@@ -32,6 +32,19 @@ async def upload_document(
     
     Returns resource_id and task_id for tracking embedding generation
     """
+    
+    if workspace_id == "":
+        workspace_id = None
+
+    if workspace_id is not None:
+        try:
+            workspace_id = UUID(workspace_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail="workspace_id must be a valid UUID"
+            )
+    
     try:
         # Validate file type
         file_ext = file.filename.split(".")[-1].lower()
@@ -97,7 +110,7 @@ async def upload_document(
             """),
             {
                 "id": str(resource_id),
-                "workspace_id": workspace_id,
+                "workspace_id": str(workspace_id),
                 "filename": file.filename,
                 "file_type": file_ext,
                 "content_hash": content_hash,
@@ -125,7 +138,7 @@ async def upload_document(
                     INSERT INTO chunks (id, resource_id, workspace_id, content, 
                                       chunk_index, token_count, chunk_metadata)
                     VALUES (:id, :resource_id, :workspace_id, :content, 
-                            :chunk_index, :token_count, :metadata::jsonb)
+                            :chunk_index, :token_count, :metadata)
                 """),
                 {
                     "id": str(chunk["id"]),
