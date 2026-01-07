@@ -120,6 +120,7 @@ async def ollama_health_check():
 # Import and include routers
 from app.api import resources, conversations, health
 
+app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(resources.router, prefix="/api/resources", tags=["Resources"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
 
