@@ -1,0 +1,67 @@
+# Core Framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# Database
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# PostgreSQL Vector Extension
+pgvector==0.3.6
+
+# LangChain & LangGraph
+langchain
+langchain-core
+langchain-community
+langchain-ollama
+langchain-google-genai
+langgraph
+
+# Embeddings
+sentence-transformers==3.3.1
+torch==2.5.1
+transformers==4.47.1
+
+# Document Processing
+pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5
+python-multipart==0.0.19
+python-magic==0.4.27
+
+# Text Processing
+tiktoken==0.8.0
+beautifulsoup4==4.12.3
+markdown==3.7
+
+# Task Queue
+celery[redis]==5.4.0
+redis==5.2.0
+
+# HTTP Client
+httpx==0.28.1
+aiohttp==3.11.11
+
+# Utilities
+python-dateutil==2.9.0.post0
+pytz==2024.2
+pyyaml==6.0.2
+
+# Monitoring & Logging
+python-json-logger==3.2.1
+structlog==24.4.0
+
+# Hardware Detection
+psutil==6.1.0
+
+# Development
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+black==24.10.0
+flake8==7.1.1
+mypy==1.14.0
