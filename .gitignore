@@ -12,3 +12,4 @@ coverage/
 thumbs.db
 .venv/
 __pycache__/    
+frontend/
