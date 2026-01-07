@@ -6,12 +6,33 @@ from typing import List, Dict
 from uuid import UUID
 from datetime import datetime
 
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+
 from app.tasks.celery_app import celery_app
 from app.services.embedding import embedding_service
-from app.database import get_db_session
-from sqlalchemy import text
+from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Create synchronous engine for Celery workers
+sync_engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10
+)
+SyncSession = sessionmaker(bind=sync_engine)
+
+
+def get_sync_db():
+    """Get synchronous database session for Celery"""
+    session = SyncSession()
+    try:
+        return session
+    except Exception:
+        session.close()
+        raise
 
 
 @celery_app.task(
@@ -94,7 +115,8 @@ def _update_task_status(
     error_message: str = None
 ):
     """Update embedding task status in database"""
-    with get_db_session() as db:
+    db = get_sync_db()
+    try:
         updates = ["status = :status"]
         params = {
             "resource_id": resource_id,
@@ -130,11 +152,14 @@ def _update_task_status(
         
         db.execute(sql, params)
         db.commit()
+    finally:
+        db.close()
 
 
 def _store_embeddings(chunks: List[Dict], embeddings: List[List[float]]):
     """Store embeddings in the database"""
-    with get_db_session() as db:
+    db = get_sync_db()
+    try:
         for chunk, embedding in zip(chunks, embeddings):
             # Convert embedding to PostgreSQL vector format
             embedding_str = f"[{','.join(map(str, embedding))}]"
@@ -151,11 +176,14 @@ def _store_embeddings(chunks: List[Dict], embeddings: List[List[float]]):
             })
         
         db.commit()
+    finally:
+        db.close()
 
 
 def _update_resource_status(resource_id: str, status: str):
     """Update resource processing status"""
-    with get_db_session() as db:
+    db = get_sync_db()
+    try:
         sql = text("""
             UPDATE resources
             SET status = :status, updated_at = :updated_at
@@ -168,6 +196,8 @@ def _update_resource_status(resource_id: str, status: str):
             "updated_at": datetime.utcnow()
         })
         db.commit()
+    finally:
+        db.close()
 
 
 @celery_app.task
@@ -178,26 +208,27 @@ def cleanup_old_tasks():
     """
     logger.info("Running cleanup of old embedding tasks")
     
+    db = get_sync_db()
     try:
-        with get_db_session() as db:
-            # Delete tasks older than 30 days
-            sql = text("""
-                DELETE FROM embedding_tasks
-                WHERE (status = 'completed' OR status = 'failed')
-                    AND created_at < NOW() - INTERVAL '30 days'
-            """)
-            
-            result = db.execute(sql)
-            db.commit()
-            
-            deleted_count = result.rowcount
-            logger.info(f"Cleaned up {deleted_count} old tasks")
-            
-            return {"deleted_count": deleted_count}
-            
+        # Delete tasks older than 30 days
+        sql = text("""
+            DELETE FROM embedding_tasks
+            WHERE (status = 'completed' OR status = 'failed')
+                AND created_at < NOW() - INTERVAL '30 days'
+        """)
+        
+        result = db.execute(sql)
+        db.commit()
+        
+        deleted_count = result.rowcount
+        logger.info(f"Cleaned up {deleted_count} old tasks")
+        
+        return {"deleted_count": deleted_count}
     except Exception as e:
         logger.error(f"Cleanup task failed: {e}")
         raise
+    finally:
+        db.close()
 
 
 @celery_app.task
@@ -208,20 +239,21 @@ def reindex_chunks():
     """
     logger.info("Running HNSW index rebuild")
     
+    db = get_sync_db()
     try:
-        with get_db_session() as db:
-            # Rebuild the HNSW index
-            sql = text("""
-                REINDEX INDEX CONCURRENTLY idx_chunks_embedding
-            """)
-            
-            db.execute(sql)
-            db.commit()
-            
-            logger.info("HNSW index rebuild completed")
-            
-            return {"status": "completed"}
-            
+        # Rebuild the HNSW index
+        sql = text("""
+            REINDEX INDEX CONCURRENTLY idx_chunks_embedding
+        """)
+        
+        db.execute(sql)
+        db.commit()
+        
+        logger.info("HNSW index rebuild completed")
+        
+        return {"status": "completed"}
     except Exception as e:
         logger.error(f"Index rebuild failed: {e}")
         raise
+    finally:
+        db.close()
