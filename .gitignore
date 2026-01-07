@@ -1,0 +1,14 @@
+nodemodules/
+dist/
+.env
+.DS_Store
+.vscode/
+.idea/
+*.log
+coverage/
+*.tmp
+*.bak
+.cache/
+thumbs.db
+.venv/
+__pycache__/    
