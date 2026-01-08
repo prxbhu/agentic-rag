@@ -2,14 +2,28 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Workspaces for multi-tenancy
 CREATE TABLE workspaces (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     workspace_type VARCHAR(50) DEFAULT 'personal', -- personal, team, hybrid
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TRIGGER trg_workspaces_updated_at
+BEFORE UPDATE ON workspaces
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
 
 -- Resources table for tracking documents
 CREATE TABLE resources (
@@ -22,13 +36,18 @@ CREATE TABLE resources (
     file_size_bytes BIGINT NOT NULL,
     status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_resources_workspace ON resources(workspace_id);
 CREATE INDEX idx_resources_hash ON resources(content_hash);
 CREATE INDEX idx_resources_status ON resources(status);
+
+CREATE TRIGGER trg_resources_updated_at
+BEFORE UPDATE ON resources
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
 
 -- Chunks table optimized for vector retrieval
 CREATE TABLE chunks (
@@ -41,7 +60,7 @@ CREATE TABLE chunks (
     token_count INTEGER NOT NULL,
     chunk_metadata JSONB DEFAULT '{}', -- stores section, page_num, etc.
     citation_count INTEGER DEFAULT 0, -- tracks usage frequency
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- HNSW index for fast approximate nearest neighbor search
@@ -65,12 +84,17 @@ CREATE TABLE conversations (
     model_name VARCHAR(100) NOT NULL,
     system_prompt TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_conversations_workspace ON conversations(workspace_id);
 CREATE INDEX idx_conversations_created ON conversations(created_at DESC);
+
+CREATE TRIGGER trg_conversations_updated_at
+BEFORE UPDATE ON conversations
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
 
 -- Messages with source tracking
 CREATE TABLE messages (
@@ -81,7 +105,7 @@ CREATE TABLE messages (
     citations JSONB DEFAULT '[]', -- [{chunk_id, source_name, confidence}]
     source_chunks UUID[] DEFAULT '{}', -- array of chunk IDs used
     model_metadata JSONB DEFAULT '{}', -- tokens, latency, etc.
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_messages_conversation ON messages(conversation_id);
@@ -98,7 +122,7 @@ CREATE TABLE embedding_tasks (
     error_message TEXT,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_embedding_tasks_resource ON embedding_tasks(resource_id);
@@ -111,19 +135,15 @@ CREATE TABLE source_quality (
     quality_score DECIMAL(3, 2) DEFAULT 0.5, -- 0.0 to 1.0
     specificity_score DECIMAL(3, 2) DEFAULT 0.5,
     recency_weight DECIMAL(3, 2) DEFAULT 0.5,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_source_quality_resource ON source_quality(resource_id);
 
--- Function to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_source_quality_updated_at
+BEFORE UPDATE ON source_quality
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
 
 -- Triggers for automatic timestamp updates
 CREATE TRIGGER update_resources_updated_at
