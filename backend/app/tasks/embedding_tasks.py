@@ -4,7 +4,7 @@ Celery tasks for asynchronous embedding generation
 import logging
 from typing import List, Dict
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -119,18 +119,17 @@ def _update_task_status(
     try:
         updates = ["status = :status"]
         params = {
-            "resource_id": resource_id,
             "task_id": task_id,
             "status": status
         }
         
         if status == "processing":
-            updates.append("started_at = :started_at")
-            params["started_at"] = datetime.utcnow()
+            updates.append("started_at = NOW()")
+            params["started_at"] = datetime.now(timezone.utc)
         
         if status == "completed":
-            updates.append("completed_at = :completed_at")
-            params["completed_at"] = datetime.utcnow()
+            updates.append("completed_at = NOW()")
+            params["completed_at"] = datetime.now(timezone.utc)
         
         if total_chunks is not None:
             updates.append("total_chunks = :total_chunks")
@@ -147,7 +146,7 @@ def _update_task_status(
         sql = text(f"""
             UPDATE embedding_tasks
             SET {', '.join(updates)}
-            WHERE resource_id = :resource_id AND task_id = :task_id
+            WHERE task_id = :task_id
         """)
         
         db.execute(sql, params)
@@ -193,7 +192,7 @@ def _update_resource_status(resource_id: str, status: str):
         db.execute(sql, {
             "resource_id": resource_id,
             "status": status,
-            "updated_at": datetime.utcnow()
+            "updated_at": datetime.now(timezone.utc)
         })
         db.commit()
     finally:
