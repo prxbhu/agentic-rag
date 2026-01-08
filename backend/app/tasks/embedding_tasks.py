@@ -125,11 +125,11 @@ def _update_task_status(
         
         if status == "processing":
             updates.append("started_at = NOW()")
-            params["started_at"] = datetime.now(timezone.utc)
+            params["started_at"] = datetime.now()
         
         if status == "completed":
             updates.append("completed_at = NOW()")
-            params["completed_at"] = datetime.now(timezone.utc)
+            params["completed_at"] = datetime.now()
         
         if total_chunks is not None:
             updates.append("total_chunks = :total_chunks")
@@ -192,7 +192,7 @@ def _update_resource_status(resource_id: str, status: str):
         db.execute(sql, {
             "resource_id": resource_id,
             "status": status,
-            "updated_at": datetime.now(timezone.utc)
+            "updated_at": datetime.now()
         })
         db.commit()
     finally:
