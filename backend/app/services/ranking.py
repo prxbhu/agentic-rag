@@ -3,7 +3,7 @@ Multi-factor ranking service for re-ranking search results
 """
 import logging
 from typing import List, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -99,13 +99,13 @@ class RankingService:
             )
             row = db_result.fetchone()
             
-            if row:
+            if row and row.created_at:
                 result["resource_created_at"] = row.created_at
                 result["resource_metadata"] = row.metadata
                 result["stored_quality_score"] = float(row.quality_score)
                 result["stored_specificity_score"] = float(row.specificity_score)
             else:
-                result["resource_created_at"] = lambda: datetime.now(timezone.utc)
+                result["resource_created_at"] =  datetime.now()
                 result["resource_metadata"] = {}
                 result["stored_quality_score"] = 0.5
                 result["stored_specificity_score"] = 0.5
@@ -130,9 +130,8 @@ class RankingService:
         citation_frequency = min(citation_count / max_citations, 1.0)
         
         # 3. Recency score (exponential decay)
-        recency_score = self._calculate_recency_score(
-            result.get("resource_created_at", datetime.now(timezone.utc))
-        )
+        created_at = result.get("resource_created_at") or datetime.now()
+        recency_score = self._calculate_recency_score(created_at)
         
         # 4. Specificity score (from stored value or estimated)
         specificity_score = result.get("stored_specificity_score", 0.5)
@@ -161,8 +160,10 @@ class RankingService:
         
         Score decays to 0.5 after 1 year, continues decaying thereafter
         """
-        now = datetime.utcnow()
-        days_old = (now - created_at).days
+        now = datetime.now()
+        if created_at.tzinfo is not None:
+            created_at = created_at.replace(tzinfo=None)
+        days_old = max((now - created_at).days, 0)
         
         # Exponential decay: score = e^(-days/365)
         # Clamp between 0.1 and 1.0
