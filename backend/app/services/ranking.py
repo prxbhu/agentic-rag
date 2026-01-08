@@ -3,7 +3,7 @@ Multi-factor ranking service for re-ranking search results
 """
 import logging
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -105,7 +105,7 @@ class RankingService:
                 result["stored_quality_score"] = float(row.quality_score)
                 result["stored_specificity_score"] = float(row.specificity_score)
             else:
-                result["resource_created_at"] = datetime.utcnow()
+                result["resource_created_at"] = lambda: datetime.now(timezone.utc)
                 result["resource_metadata"] = {}
                 result["stored_quality_score"] = 0.5
                 result["stored_specificity_score"] = 0.5
@@ -131,7 +131,7 @@ class RankingService:
         
         # 3. Recency score (exponential decay)
         recency_score = self._calculate_recency_score(
-            result.get("resource_created_at", datetime.utcnow())
+            result.get("resource_created_at", datetime.now(timezone.utc))
         )
         
         # 4. Specificity score (from stored value or estimated)

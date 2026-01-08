@@ -1,7 +1,7 @@
 """
 SQLAlchemy database models
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import (
     Column, String, Integer, BigInteger, DateTime, ForeignKey,
@@ -21,8 +21,8 @@ class Workspace(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     name = Column(String(255), nullable=False)
     workspace_type = Column(String(50), default="personal")  # personal, team, hybrid
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     resources = relationship("Resource", back_populates="workspace", cascade="all, delete-orphan")
@@ -43,8 +43,8 @@ class Resource(Base):
     file_size_bytes = Column(BigInteger, nullable=False)
     status = Column(String(50), default="pending")  # pending, processing, completed, failed
     resource_metadata = Column("metadata", JSONB, default={})
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     workspace = relationship("Workspace", back_populates="resources")
@@ -66,7 +66,7 @@ class Chunk(Base):
     token_count = Column(Integer, nullable=False)
     chunk_metadata = Column(JSONB, default={})
     citation_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     resource = relationship("Resource", back_populates="chunks")
@@ -83,8 +83,8 @@ class Conversation(Base):
     model_name = Column(String(100), nullable=False)
     system_prompt = Column(Text)
     conversation_metadata = Column("metadata", JSONB, default={})
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     workspace = relationship("Workspace", back_populates="conversations")
@@ -102,7 +102,7 @@ class Message(Base):
     citations = Column(JSONB, default=[])
     source_chunks = Column(ARRAY(UUID(as_uuid=True)), default=[])
     model_metadata = Column(JSONB, default={})
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
@@ -121,7 +121,7 @@ class EmbeddingTask(Base):
     error_message = Column(Text)
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     # Relationships
     resource = relationship("Resource", back_populates="embedding_tasks")
@@ -136,7 +136,7 @@ class SourceQuality(Base):
     quality_score = Column(DECIMAL(3, 2), default=0.5)
     specificity_score = Column(DECIMAL(3, 2), default=0.5)
     recency_weight = Column(DECIMAL(3, 2), default=0.5)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relationships
     resource = relationship("Resource", back_populates="source_quality")
