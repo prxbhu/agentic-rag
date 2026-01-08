@@ -1,6 +1,7 @@
 """
 API endpoints for conversations and chat messages
 """
+import json 
 import logging
 from typing import Optional
 from uuid import UUID, uuid4
@@ -200,15 +201,15 @@ async def send_message(
                 INSERT INTO messages (id, conversation_id, role, content, 
                                     citations, source_chunks, model_metadata)
                 VALUES (:id, :conversation_id, 'assistant', :content, 
-                        :citations::jsonb, :source_chunks, :metadata::jsonb)
+                        CAST(:citations AS JSONB), :source_chunks, CAST(:metadata AS JSONB))
             """),
             {
                 "id": str(assistant_message_id),
                 "conversation_id": str(conversation_id),
                 "content": result["response"],
-                "citations": result["citations"],
+                "citations": json.dumps(result["citations"], default=str),
                 "source_chunks": [str(c["chunk_id"]) for c in result["citations"]],
-                "metadata": result["metadata"]
+                "metadata": json.dumps(result["metadata"], default=str)
             }
         )
         await db.commit()
