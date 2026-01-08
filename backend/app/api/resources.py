@@ -1,6 +1,7 @@
 """
 API endpoints for resource management (document upload and processing)
 """
+import json
 import logging
 import hashlib
 from typing import Optional
@@ -134,22 +135,28 @@ async def upload_document(
         # Store chunks in database (without embeddings initially)
         for chunk in chunks:
             await db.execute(
-                text("""
-                    INSERT INTO chunks (id, resource_id, workspace_id, content, 
-                                      chunk_index, token_count, chunk_metadata)
-                    VALUES (:id, :resource_id, :workspace_id, :content, 
-                            :chunk_index, :token_count, :metadata)
-                """),
-                {
-                    "id": str(chunk["id"]),
-                    "resource_id": str(resource_id),
-                    "workspace_id": workspace_id,
-                    "content": chunk["content"],
-                    "chunk_index": chunk["chunk_index"],
-                    "token_count": chunk["token_count"],
-                    "metadata": chunk["metadata"]
-                }
-            )
+            text("""
+                INSERT INTO chunks (
+                    id, resource_id, workspace_id, content,
+                    chunk_index, token_count, chunk_metadata
+                )
+                VALUES (
+                    :id, :resource_id, :workspace_id, :content,
+                    :chunk_index, :token_count,
+                    CAST(:metadata AS JSONB)
+                )
+            """),
+            {
+                "id": str(chunk["id"]),
+                "resource_id": str(resource_id),
+                "workspace_id": str(workspace_id),
+                "content": chunk["content"],
+                "chunk_index": chunk["chunk_index"],
+                "token_count": chunk["token_count"],
+                "metadata": json.dumps(chunk["metadata"]) 
+            }
+        )
+
         await db.commit()
         
         # Start async embedding task
