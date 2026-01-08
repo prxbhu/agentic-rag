@@ -60,7 +60,7 @@ class Settings(BaseSettings):
         description="Ollama API base URL"
     )
     CHAT_MODEL: str = Field(
-        default="mistral:7b-instruct-q4_0",
+        default="gemma3n:e2b",
         description="Default chat model"
     )
     GEMINI_API_KEY: Optional[str] = Field(
