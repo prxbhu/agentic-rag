@@ -166,7 +166,7 @@ def _store_embeddings(chunks: List[Dict], embeddings: List[List[float]]):
             
             sql = text("""
                 UPDATE chunks
-                SET embedding = :embedding::vector
+                SET embedding = CAST(:embedding AS vector)
                 WHERE id = :chunk_id
             """)
             
