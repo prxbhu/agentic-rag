@@ -159,12 +159,8 @@ async def upload_document(
 
         await db.commit()
         
-        # Start async embedding task
-        task = generate_embeddings_task.delay(
-            str(resource_id),
-            [{"id": str(c["id"]), "content": c["content"]} for c in chunks]
-        )
         
+        task_id = str(uuid4())
         # Create task tracking record
         await db.execute(
             text("""
@@ -175,11 +171,17 @@ async def upload_document(
             {
                 "id": str(uuid4()),
                 "resource_id": str(resource_id),
-                "task_id": task.id,
+                "task_id": task_id,
                 "total_chunks": len(chunks)
             }
         )
         await db.commit()
+        
+         # Start async embedding task
+        task = generate_embeddings_task.apply_async(
+                args=[str(resource_id), [{"id": str(c["id"]), "content": c["content"]} for c in chunks]],
+                task_id=task_id
+)
         
         return {
             "status": "processing",
