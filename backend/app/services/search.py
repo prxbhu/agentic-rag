@@ -51,11 +51,11 @@ class SearchService:
                     c.resource_id,
                     c.chunk_metadata,
                     r.filename,
-                    1 - (c.embedding <=> :query_embedding::vector) as similarity
+                    1 - (c.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM chunks c
                 JOIN resources r ON c.resource_id = r.id
                 WHERE c.workspace_id = :workspace_id
-                ORDER BY c.embedding <=> :query_embedding::vector
+                ORDER BY c.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :limit
             """)
             
@@ -188,7 +188,7 @@ class SearchService:
             
             sql = text("""
                 SELECT * FROM hybrid_search(
-                    :query_embedding::vector,
+                    CAST(:query_embedding AS vector),
                     :query_text,
                     :workspace_id,
                     :result_limit,
