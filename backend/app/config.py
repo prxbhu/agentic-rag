@@ -101,19 +101,19 @@ class Settings(BaseSettings):
     
     # Context Assembly
     DEFAULT_TOKEN_BUDGET: int = Field(
-        default=2000,
+        default=30000,
         description="Token budget for context assembly"
     )
     PRIMARY_SOURCES_RATIO: float = Field(
-        default=0.60,
+        default=0.75,
         description="Ratio of tokens for primary sources"
     )
     SUPPORTING_CONTEXT_RATIO: float = Field(
-        default=0.30,
+        default=0.20,
         description="Ratio of tokens for supporting context"
     )
     METADATA_RATIO: float = Field(
-        default=0.10,
+        default=0.05,
         description="Ratio of tokens for metadata"
     )
     
