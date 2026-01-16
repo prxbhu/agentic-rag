@@ -127,7 +127,7 @@ async def upload_document(
             filename=file.filename,
             file_type=file_ext,
             resource_id=resource_id,
-            workspace_id=UUID(workspace_id)
+            workspace_id=UUID(str(workspace_id))
         )
         
         logger.info(f"Document processed into {len(chunks)} chunks")
