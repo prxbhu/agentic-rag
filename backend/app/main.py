@@ -11,6 +11,12 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import init_db, close_db
 from app.services.hardware import HardwareDetector
+from app.api import resources, conversations, health, workspaces
+from app.database import get_db_session
+from sqlalchemy import text
+import httpx
+import uvicorn
+    
 
 # Configure logging
 logging.basicConfig(
@@ -79,8 +85,7 @@ async def health_check():
 @app.get("/api/health/db")
 async def db_health_check():
     """Database health check"""
-    from app.database import get_db_session
-    from sqlalchemy import text
+    
     
     try:
         async with get_db_session() as db:
@@ -97,7 +102,6 @@ async def db_health_check():
 @app.get("/api/health/ollama")
 async def ollama_health_check():
     """Ollama service health check"""
-    import httpx
     
     try:
         async with httpx.AsyncClient() as client:
@@ -117,12 +121,11 @@ async def ollama_health_check():
         )
 
 
-# Import and include routers
-from app.api import resources, conversations, health
 
 app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(resources.router, prefix="/api/resources", tags=["Resources"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
+app.include_router(workspaces.router, prefix="/api/workspaces", tags=["Workspaces"])
 
 
 # Root endpoint
@@ -152,8 +155,7 @@ async def global_exception_handler(request, exc):
 
 
 if __name__ == "__main__":
-    import uvicorn
-    
+   
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

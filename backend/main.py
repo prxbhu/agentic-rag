@@ -15,8 +15,8 @@ from app.config import settings
 from app.database import init_db, close_db
 from app.services.hardware import HardwareDetector
 
-# Import and include routers
-from app.api import resources, conversations, health
+from app.api import resources, conversations, health, workspaces
+from app.services.embedding import embedding_service
 
 # Configure logging
 logging.basicConfig(
@@ -39,8 +39,7 @@ async def lifespan(app: FastAPI):
     system_info = HardwareDetector.get_system_info()
     logger.info(f"System Info: {system_info}")
     
-    # Warm up embedding service
-    from app.services.embedding import embedding_service
+    
     logger.info(f"Embedding model info: {embedding_service.get_model_info()}")
     
     logger.info("Application started successfully")
@@ -70,58 +69,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Health check endpoints
-@app.get("/api/health")
-async def health_check():
-    """Basic health check"""
-    return {
-        "status": "healthy",
-        "version": settings.API_VERSION,
-        "system": HardwareDetector.get_system_info()
-    }
-
-
-@app.get("/api/health/db")
-async def db_health_check():
-    """Database health check"""
-    
-    
-    try:
-        async with get_db_session() as db:
-            await db.execute(text("SELECT 1"))
-        return {"status": "healthy", "database": "connected"}
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={"status": "unhealthy", "database": "disconnected", "error": str(e)}
-        )
-
-
-@app.get("/api/health/ollama")
-async def ollama_health_check():
-    """Ollama service health check"""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=5.0)
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                return {
-                    "status": "healthy",
-                    "ollama": "connected",
-                    "models": [m["name"] for m in models]
-                }
-    except Exception as e:
-        logger.error(f"Ollama health check failed: {e}")
-        return JSONResponse(
-            status_code=503,
-            content={"status": "unhealthy", "ollama": "disconnected", "error": str(e)}
-        )
-
-
+app.include_router(health.router, prefix="/api/health", tags=["Health"])
 app.include_router(resources.router, prefix="/api/resources", tags=["Resources"])
 app.include_router(conversations.router, prefix="/api/conversations", tags=["Conversations"])
+app.include_router(workspaces.router, prefix="/api/workspaces", tags=["Workspaces"])
 
 
 # Root endpoint
