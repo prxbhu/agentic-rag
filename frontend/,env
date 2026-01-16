@@ -1,0 +1,5 @@
+# API Configuration
+VITE_API_URL=http://localhost:8000
+
+# Optional: Default workspace ID
+VITE_DEFAULT_WORKSPACE_ID=default
