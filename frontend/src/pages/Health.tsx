@@ -178,29 +178,6 @@ export default function Health() {
             </div>
           ))}
         </div>
-
-        {/* Health Check Endpoints Info */}
-        <div className="card mt-8">
-          <h2 className="text-xl font-semibold mb-4">Available Health Endpoints</h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between py-2 border-b border-gray-200">
-              <span className="font-mono text-primary-600">/api/health</span>
-              <span className="text-gray-600">Basic health check</span>
-            </div>
-            <div className="flex justify-between py-2 border-b border-gray-200">
-              <span className="font-mono text-primary-600">/api/health/detailed</span>
-              <span className="text-gray-600">Detailed health information</span>
-            </div>
-            <div className="flex justify-between py-2 border-b border-gray-200">
-              <span className="font-mono text-primary-600">/api/health/ready</span>
-              <span className="text-gray-600">Kubernetes readiness probe</span>
-            </div>
-            <div className="flex justify-between py-2">
-              <span className="font-mono text-primary-600">/api/health/live</span>
-              <span className="text-gray-600">Kubernetes liveness probe</span>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
