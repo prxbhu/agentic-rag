@@ -26,6 +26,7 @@ export interface Resource {
   workspace_id: string;
   created_at: string;
   embedding_status?: 'pending' | 'processing' | 'completed' | 'failed';
+  status?: string;
 }
 
 export interface Conversation {
@@ -91,6 +92,10 @@ export const resourceApi = {
       },
     });
   },
+  list: (workspaceId?: string, limit: number = 20, offset: number = 0) => 
+    api.get<{resources: Resource[]}>('/resources/list', {
+        params: { workspace_id: workspaceId, limit, offset }
+    }),
   getEmbeddingStatus: (resourceId: string) =>
     api.get<EmbeddingStatus>(`/resources/${resourceId}/embedding-status`),
   get: (resourceId: string) => api.get<Resource>(`/resources/${resourceId}`),
@@ -107,6 +112,10 @@ export const conversationApi = {
     }),
   get: (conversationId: string) =>
     api.get<Conversation>(`/conversations/${conversationId}`),
+  list: (workspaceId?: string, limit: number = 20, offset: number = 0) => 
+    api.get<{conversations: Conversation[]}>('/conversations/list', {
+      params: { workspace_id: workspaceId, limit, offset }
+    }),
   delete: (conversationId: string) =>
     api.delete(`/conversations/${conversationId}`),
   sendMessage: (conversationId: string, content: string, workspaceId: string) =>
