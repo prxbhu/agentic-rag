@@ -118,7 +118,7 @@ async def upload_document(
                 "file_size": file_size
             }
         )
-        await db.commit()
+        # await db.commit()
         
         # Process document into chunks
         ingestion_service = IngestionService()
@@ -157,7 +157,7 @@ async def upload_document(
             }
         )
 
-        await db.commit()
+        # await db.commit()
         
         
         task_id = str(uuid4())
@@ -175,7 +175,7 @@ async def upload_document(
                 "total_chunks": len(chunks)
             }
         )
-        await db.commit()
+        # await db.commit()
         
          # Start async embedding task
         task = generate_embeddings_task.apply_async(
@@ -196,6 +196,7 @@ async def upload_document(
         raise
     except Exception as e:
         logger.error(f"Upload failed: {e}")
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -256,6 +257,7 @@ async def get_embedding_status(
         raise
     except Exception as e:
         logger.error(f"Status check failed: {e}")
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -300,6 +302,7 @@ async def get_resource(
         raise
     except Exception as e:
         logger.error(f"Get resource failed: {e}")
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -324,7 +327,7 @@ async def delete_resource(
             text("DELETE FROM resources WHERE id = :resource_id"),
             {"resource_id": str(resource_id)}
         )
-        await db.commit()
+        # await db.commit()
         
         return {"status": "deleted", "resource_id": str(resource_id)}
         
