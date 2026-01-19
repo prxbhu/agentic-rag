@@ -21,7 +21,6 @@ from app.services.ranking import RankingService
 from app.services.citation import CitationService
 from app.services.hardware import HardwareDetector
 from app.services.llm_service import get_llm_service
-from app.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +45,15 @@ class Message(BaseModel):
     citations: list
     created_at: str
 
-# Helper Function
-async def generate_conversation_title(conversation_id: str, user_content: str, assistant_content: str, db: AsyncSession):
+
+async def generate_conversation_title(conversation_id: str, user_content: str, assistant_content: str):
     """Background task to generate a title for the conversation"""
     try:
+        # We need a new database session for the background task
+        from app.database import AsyncSessionLocal
+        
         llm = get_llm_service()
-        prompt = f"""Summarize the following interaction into a short, concise title (max 5 words).
+        prompt = f"""Summarize the following interaction into a short, concise title (max 5 words). Do not use quotes.
         User: {user_content[:200]}
         Assistant: {assistant_content[:200]}
         Title:"""
@@ -59,17 +61,24 @@ async def generate_conversation_title(conversation_id: str, user_content: str, a
         messages = [HumanMessage(content=prompt)]
         title = await llm.generate(messages, temperature=0.7)
         title = title.strip().strip('"')
-
+        
+        logger.info(f"Generated title for {conversation_id}: {title}")
+        
         async with AsyncSessionLocal() as session:
-            await session.execute(
-                text("UPDATE conversations SET title = :title WHERE id = :id"),
-                {"title": title, "id": conversation_id}
-            )
-            await session.commit()
+            try:
+                await session.execute(
+                    text("UPDATE conversations SET title = :title WHERE id = :id"),
+                    {"title": title, "id": conversation_id}
+                )
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Database update failed for title generation: {e}")
             
     except Exception as e:
         logger.error(f"Failed to auto-generate title: {e}")
-        
+
+
 @router.post("")
 async def create_conversation(
     request: CreateConversationRequest,
@@ -78,7 +87,10 @@ async def create_conversation(
     """Create a new conversation"""
     try:
         conversation_id = uuid4()
+        
+        # Use optimal model from hardware detector instead of settings default
         model_name = HardwareDetector.get_optimal_model()
+        
         await db.execute(
             text("""
                 INSERT INTO conversations (id, workspace_id, title, model_name, system_prompt)
@@ -92,19 +104,60 @@ async def create_conversation(
                 "system_prompt": request.system_prompt
             }
         )
-        #await db.commit()
+        # Commit is handled by the dependency or explicit commit here
+        await db.commit()
         
         return {
             "id": str(conversation_id),
             "workspace_id": request.workspace_id,
             "title": request.title or "New Conversation",
+            "model_name": model_name,
             "created_at": "now"
         }
         
     except Exception as e:
         logger.error(f"Create conversation failed: {e}")
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/list")
+async def list_conversations(
+    workspace_id: Optional[UUID] = None,
+    limit: int = 20,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    """List conversations, optionally filtered by workspace"""
+    try:
+        query = """
+            SELECT id, workspace_id, title, model_name, created_at
+            FROM conversations
+        """
+        params = {"limit": limit, "offset": offset}
+        
+        if workspace_id:
+            query += " WHERE workspace_id = :workspace_id"
+            params["workspace_id"] = str(workspace_id)
+            
+        query += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+        
+        result = await db.execute(text(query), params)
+        
+        conversations = []
+        for row in result.fetchall():
+            conversations.append({
+                "id": str(row.id),
+                "workspace_id": str(row.workspace_id),
+                "title": row.title,
+                "model_name": row.model_name,
+                "created_at": row.created_at.isoformat()
+            })
+        
+        return {"conversations": conversations}
+        
+    except Exception as e:
+        logger.error(f"List conversations failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{conversation_id}")
 async def get_conversation(
@@ -163,36 +216,6 @@ async def get_conversation(
         logger.error(f"Get conversation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/list")
-async def list_conversations(
-    db: AsyncSession = Depends(get_db)
-):
-    """List all conversations"""
-    try:
-        result = await db.execute(
-            text("""
-                SELECT id, workspace_id, title, model_name, created_at
-                FROM conversations
-                ORDER BY created_at DESC
-            """)
-        )
-        
-        conversations = []
-        for row in result.fetchall():
-            conversations.append({
-                "id": str(row.id),
-                "workspace_id": str(row.workspace_id),
-                "title": row.title,
-                "model_name": row.model_name,
-                "created_at": row.created_at.isoformat()
-            })
-        
-        return {"conversations": conversations}
-        
-    except Exception as e:
-        logger.error(f"List conversations failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
 @router.get("/{conversation_id}/messages")
 async def get_messages(
     conversation_id: UUID,
@@ -237,22 +260,15 @@ async def send_message(
 ):
     """
     Send a message and get RAG response
-    
-    This endpoint triggers the full RAG pipeline:
-    1. Query expansion
-    2. Hybrid search
-    3. Multi-factor ranking
-    4. Context assembly
-    5. LLM generation
-    6. Citation verification
     """
     try:
-        # Verify conversation exists
+        # Verify conversation exists and get title
         conv_result = await db.execute(
-            text("SELECT id FROM conversations WHERE id = :id"),
+            text("SELECT id, title FROM conversations WHERE id = :id"),
             {"id": str(conversation_id)}
         )
-        if not conv_result.fetchone():
+        conv = conv_result.fetchone()
+        if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
         
         # Store user message
@@ -268,7 +284,7 @@ async def send_message(
                 "content": request.content
             }
         )
-        # await db.commit()
+        await db.commit()
         
         # Initialize services
         search_service = SearchService(db)
@@ -304,11 +320,20 @@ async def send_message(
                 "metadata": json.dumps(result["metadata"], default=str)
             }
         )
-        # await db.commit()
+        await db.commit()
         
         # Update citation counts
         for citation in result["citations"]:
             await ranking_service.update_citation_count(citation["chunk_id"])
+            
+        # Trigger title generation if it's the first exchange (title is "New Conversation")
+        if conv.title == "New Conversation":
+            background_tasks.add_task(
+                generate_conversation_title, 
+                str(conversation_id), 
+                request.content, 
+                result["response"]
+            )
         
         return {
             "message_id": str(assistant_message_id),
@@ -391,7 +416,7 @@ async def delete_conversation(
         if not result.fetchone():
             raise HTTPException(status_code=404, detail="Conversation not found")
         
-        # await db.commit()
+        await db.commit()
         
         return {"status": "deleted", "conversation_id": str(conversation_id)}
         
