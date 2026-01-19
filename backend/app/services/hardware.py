@@ -133,7 +133,7 @@ class HardwareDetector:
         """
         Get optimal model based on hardware.
         Returns:
-            Model name to use (e.g., 'mistral:7b-instruct-q4_0' for CPU)
+            Model name to use (e.g., 'gemma3:4b' for CPU)
         """
         has_gpu = HardwareDetector.has_gpu()
         memory_gb = HardwareDetector.get_available_memory()
@@ -143,17 +143,17 @@ class HardwareDetector:
         if has_gpu:
             # With GPU, use larger unquantized model
             if memory_gb >= 16:
-                return "mistral:7b-instruct"
+                return "gemma3:4b"
             else:
-                return "mistral:7b-instruct-q4_0"
+                return "gemma3:4b"
         
         # CPU only - use quantized small model
         if memory_gb >= 16:
-            return "mistral:7b-instruct-q4_0"
+            return "gemma3:4b"
         elif memory_gb >= 8:
-            return "gemma:2b-instruct-q4_0"
+            return "gemma3:4b"
         else:
-            return "phi:2.7b-instruct-q4_0"
+            return "gemma3:4b"
     
     @staticmethod
     def get_ollama_options() -> Dict:
