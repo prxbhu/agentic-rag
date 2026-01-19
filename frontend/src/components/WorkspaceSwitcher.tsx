@@ -26,7 +26,7 @@ export default function WorkspaceSwitcher() {
         <div className="relative">
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors w-full"
+                className="flex items-center space-x-2 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-medium transition-colors w-full border border-transparent dark:text-gray-200"
             >
                 <div className="w-6 h-6 rounded bg-primary-600 flex items-center justify-center text-xs text-white uppercase">
                     {currentWorkspace.name.substring(0, 2)}
@@ -44,9 +44,9 @@ export default function WorkspaceSwitcher() {
                             setIsCreating(false);
                         }}
                     />
-                    <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-200 z-20 overflow-hidden">
+                    <div className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-20 overflow-hidden">
                         <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
-                            <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Workspaces
                             </div>
                             {workspaces.map((ws) => (
@@ -57,8 +57,8 @@ export default function WorkspaceSwitcher() {
                                         setIsOpen(false);
                                     }}
                                     className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-md transition-colors ${ws.id === currentWorkspace.id
-                                            ? 'bg-primary-50 text-primary-700'
-                                            : 'text-gray-700 hover:bg-gray-50'
+                                            ? 'bg-primary-50 dark:bg-primary-900/50 text-primary-700 dark:text-primary-400'
+                                            : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                                         }`}
                                 >
                                     <span className="truncate">{ws.name}</span>
@@ -67,7 +67,7 @@ export default function WorkspaceSwitcher() {
                             ))}
                         </div>
 
-                        <div className="border-t border-gray-200 p-2">
+                        <div className="border-t border-gray-200 dark:border-gray-700 p-2">
                             {isCreating ? (
                                 <form onSubmit={handleCreate} className="space-y-2">
                                     <input
@@ -75,7 +75,7 @@ export default function WorkspaceSwitcher() {
                                         value={newWorkspaceName}
                                         onChange={(e) => setNewWorkspaceName(e.target.value)}
                                         placeholder="Workspace name"
-                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 text-gray-900"
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 text-gray-900 dark:text-white dark:bg-gray-700"
                                         autoFocus
                                     />
                                     <div className="flex space-x-2">
@@ -89,7 +89,7 @@ export default function WorkspaceSwitcher() {
                                         <button
                                             type="button"
                                             onClick={() => setIsCreating(false)}
-                                            className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200"
+                                            className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded hover:bg-gray-200 dark:hover:bg-gray-600"
                                         >
                                             Cancel
                                         </button>
@@ -98,7 +98,7 @@ export default function WorkspaceSwitcher() {
                             ) : (
                                 <button
                                     onClick={() => setIsCreating(true)}
-                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-md transition-colors"
+                                    className="w-full flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md transition-colors"
                                 >
                                     <Plus size={16} />
                                     <span>New Workspace</span>
