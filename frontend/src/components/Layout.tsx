@@ -39,7 +39,7 @@ export default function Layout() {
         </nav>
 
         <div className="p-4 border-t border-gray-200 text-xs text-gray-500">
-          <p>© 2024 RAG System</p>
+          <p>© 2026 RAG System</p>
           <p className="mt-1">Version 1.0.0</p>
         </div>
       </aside>
