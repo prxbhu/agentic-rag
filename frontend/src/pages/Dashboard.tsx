@@ -48,20 +48,20 @@ export default function Dashboard() {
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
             Welcome to Agentic RAG System
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-600 dark:text-gray-400">
             Production-ready Retrieval-Augmented Generation with LangChain and LangGraph
           </p>
         </div>
 
         {/* System Status */}
-        <div className="card mb-8">
+        <div className="card mb-8 bg-white dark:bg-gray-800 border dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold mb-1">System Status</h2>
-              <p className="text-sm text-gray-600">
+              <h2 className="text-lg font-semibold mb-1 text-gray-900 dark:text-white">System Status</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 Current operational status of the RAG system
               </p>
             </div>
@@ -75,46 +75,46 @@ export default function Dashboard() {
                     : 'bg-yellow-500'
                 }`}
               />
-              <span className="text-sm font-medium capitalize">{healthStatus}</span>
+              <span className="text-sm font-medium capitalize text-gray-700 dark:text-gray-300">{healthStatus}</span>
             </div>
           </div>
         </div>
 
         {/* Quick Actions */}
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Quick Actions</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {quickActions.map((action) => (
               <Link
                 key={action.to}
                 to={action.to}
-                className="card hover:shadow-md transition-shadow group"
+                className="card hover:shadow-md transition-shadow group bg-white dark:bg-gray-800 border dark:border-gray-700"
               >
                 <div className={`${action.color} w-12 h-12 rounded-lg flex items-center justify-center mb-4`}>
                   <action.icon className="text-white" size={24} />
                 </div>
-                <h3 className="text-lg font-semibold mb-2 flex items-center justify-between">
+                <h3 className="text-lg font-semibold mb-2 flex items-center justify-between text-gray-900 dark:text-white">
                   {action.title}
                   <ArrowRight
                     size={18}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 dark:text-gray-400"
                   />
                 </h3>
-                <p className="text-sm text-gray-600">{action.description}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{action.description}</p>
               </Link>
             ))}
           </div>
         </div>
 
         {/* Features */}
-        <div className="card">
-          <h2 className="text-xl font-semibold mb-4">Key Features</h2>
+        <div className="card bg-white dark:bg-gray-800 border dark:border-gray-700">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Key Features</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex items-start space-x-3">
               <div className="w-2 h-2 bg-primary-500 rounded-full mt-2" />
               <div>
-                <h3 className="font-medium mb-1">Query Expansion</h3>
-                <p className="text-sm text-gray-600">
+                <h3 className="font-medium mb-1 text-gray-900 dark:text-white">Query Expansion</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
                   Intelligent query reformulation for better retrieval
                 </p>
               </div>
@@ -122,8 +122,8 @@ export default function Dashboard() {
             <div className="flex items-start space-x-3">
               <div className="w-2 h-2 bg-primary-500 rounded-full mt-2" />
               <div>
-                <h3 className="font-medium mb-1">Hybrid Search</h3>
-                <p className="text-sm text-gray-600">
+                <h3 className="font-medium mb-1 text-gray-900 dark:text-white">Hybrid Search</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
                   Combines semantic and keyword-based search
                 </p>
               </div>
@@ -131,8 +131,8 @@ export default function Dashboard() {
             <div className="flex items-start space-x-3">
               <div className="w-2 h-2 bg-primary-500 rounded-full mt-2" />
               <div>
-                <h3 className="font-medium mb-1">Multi-factor Ranking</h3>
-                <p className="text-sm text-gray-600">
+                <h3 className="font-medium mb-1 text-gray-900 dark:text-white">Multi-factor Ranking</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
                   Advanced scoring for relevant context selection
                 </p>
               </div>
@@ -140,8 +140,8 @@ export default function Dashboard() {
             <div className="flex items-start space-x-3">
               <div className="w-2 h-2 bg-primary-500 rounded-full mt-2" />
               <div>
-                <h3 className="font-medium mb-1">Citation Verification</h3>
-                <p className="text-sm text-gray-600">
+                <h3 className="font-medium mb-1 text-gray-900 dark:text-white">Citation Verification</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
                   Automatic citation checking and validation
                 </p>
               </div>
