@@ -65,7 +65,7 @@ async def create_conversation(
                 "system_prompt": request.system_prompt
             }
         )
-        await db.commit()
+        #await db.commit()
         
         return {
             "id": str(conversation_id),
@@ -176,7 +176,7 @@ async def send_message(
                 "content": request.content
             }
         )
-        await db.commit()
+        # await db.commit()
         
         # Initialize services
         search_service = SearchService(db)
@@ -212,7 +212,7 @@ async def send_message(
                 "metadata": json.dumps(result["metadata"], default=str)
             }
         )
-        await db.commit()
+        # await db.commit()
         
         # Update citation counts
         for citation in result["citations"]:
@@ -230,6 +230,7 @@ async def send_message(
         raise
     except Exception as e:
         logger.error(f"Send message failed: {e}")
+        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -298,7 +299,7 @@ async def delete_conversation(
         if not result.fetchone():
             raise HTTPException(status_code=404, detail="Conversation not found")
         
-        await db.commit()
+        # await db.commit()
         
         return {"status": "deleted", "conversation_id": str(conversation_id)}
         
