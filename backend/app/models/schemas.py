@@ -4,7 +4,7 @@ Pydantic schemas for request/response validation
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # Workspace Schemas
@@ -21,9 +21,7 @@ class WorkspaceResponse(WorkspaceBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
-    
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Resource Schemas
@@ -44,10 +42,8 @@ class ResourceResponse(ResourceBase):
     status: str
     chunk_count: Optional[int] = 0
     created_at: datetime
-    metadata: Dict[str, Any] = {}
-    
-    class Config:
-        from_attributes = True
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResourceUploadResponse(BaseModel):
@@ -69,7 +65,7 @@ class ChunkBase(BaseModel):
 class ChunkCreate(ChunkBase):
     resource_id: UUID
     workspace_id: UUID
-    chunk_metadata: Dict[str, Any] = {}
+    chunk_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ChunkResponse(ChunkBase):
@@ -77,10 +73,8 @@ class ChunkResponse(ChunkBase):
     resource_id: UUID
     citation_count: int
     created_at: datetime
-    metadata: Dict[str, Any] = {}
-    
-    class Config:
-        from_attributes = True
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChunkWithScore(ChunkResponse):
@@ -105,13 +99,10 @@ class ConversationResponse(ConversationBase):
     model_name: str
     created_at: datetime
     updated_at: datetime
-    
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 class ConversationWithMessages(ConversationResponse):
-    messages: List["MessageResponse"] = []
+    messages: List["MessageResponse"] = Field(default_factory=list)
 
 
 # Message Schemas
@@ -127,15 +118,12 @@ class MessageResponse(MessageBase):
     id: UUID
     conversation_id: UUID
     role: str
-    citations: List[Dict[str, Any]] = []
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 class MessageWithMetadata(MessageResponse):
-    model_metadata: Dict[str, Any] = {}
+    model_metadata: Dict[str, Any] = Field(default_factory=dict)
     source_chunks: List[UUID] = []
 
 
