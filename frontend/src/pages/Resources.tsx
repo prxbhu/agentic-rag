@@ -1,9 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Upload, Loader2, CheckCircle, XCircle, AlertCircle, Trash2 } from 'lucide-react';
-import { resourceApi, UploadResponse, EmbeddingStatus } from '@/lib/api';
+import { resourceApi, UploadResponse, EmbeddingStatus, Resource } from '@/lib/api';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
-interface UploadedResource extends UploadResponse {
+interface UploadedResource extends Resource {
   embeddingStatus?: EmbeddingStatus;
 }
 
@@ -12,7 +12,48 @@ export default function Resources() {
   const [resources, setResources] = useState<UploadedResource[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingList, setLoadingList] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch resources when workspace changes
+  useEffect(() => {
+    if (currentWorkspace) {
+      // Reset list when workspace changes
+      setResources([]);
+      setPage(0);
+      setHasMore(true);
+      fetchResources(0, true);
+    }
+  }, [currentWorkspace]);
+
+  const fetchResources = async (pageNum: number, reset = false) => {
+    if (!currentWorkspace) return;
+    setLoadingList(true);
+    try {
+      const response = await resourceApi.list(currentWorkspace.id, 20, pageNum * 20);
+      const newResources = response.data.resources;
+      
+      if (newResources.length < 20) {
+        setHasMore(false);
+      } else {
+        setHasMore(true);
+      }
+
+      if (reset) {
+        setResources(newResources);
+        setPage(1);
+      } else {
+        setResources(prev => [...prev, ...newResources]);
+        setPage(pageNum + 1);
+      }
+    } catch (err) {
+      console.error("Failed to load resources", err);
+    } finally {
+      setLoadingList(false);
+    }
+  };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -27,11 +68,22 @@ export default function Resources() {
       const file = files[0];
       const response = await resourceApi.upload(file, currentWorkspace.id);
 
-      const newResource = response.data;
+      const newResource: UploadedResource = {
+        id: response.data.resource_id,
+        filename: response.data.filename,
+        workspace_id: currentWorkspace.id,
+        created_at: new Date().toISOString(),
+        status: 'processing',
+        embeddingStatus: { 
+            resource_id: response.data.resource_id, 
+            status: 'processing' 
+        }
+      };
+      
       setResources((prev) => [newResource, ...prev]);
 
       // Start polling for embedding status
-      pollEmbeddingStatus(newResource.resource_id);
+      pollEmbeddingStatus(newResource.id);
 
       // Reset file input
       if (fileInputRef.current) {
@@ -56,8 +108,8 @@ export default function Resources() {
 
         setResources((prev) =>
           prev.map((r) =>
-            r.resource_id === resourceId
-              ? { ...r, embeddingStatus: status }
+            r.id === resourceId
+              ? { ...r, status: status.status, embeddingStatus: status }
               : r
           )
         );
@@ -83,7 +135,7 @@ export default function Resources() {
 
     try {
       await resourceApi.delete(resourceId);
-      setResources((prev) => prev.filter((r) => r.resource_id !== resourceId));
+      setResources((prev) => prev.filter((r) => r.id !== resourceId));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete resource');
       console.error(err);
@@ -117,20 +169,20 @@ export default function Resources() {
   };
 
   return (
-    <div className="p-8">
-      <div className="max-w-6xl mx-auto">
+    <div className="p-8 h-full flex flex-col">
+      <div className="max-w-6xl mx-auto w-full flex flex-col h-full">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Resources</h1>
-          <p className="text-gray-600">
+        <div className="mb-8 flex-shrink-0">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Resources</h1>
+          <p className="text-gray-600 dark:text-gray-400">
             Upload and manage documents for your knowledge base
           </p>
         </div>
 
         {/* Upload Section */}
-        <div className="card mb-8">
-          <h2 className="text-xl font-semibold mb-4">Upload Document</h2>
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+        <div className="card mb-8 bg-white dark:bg-gray-800 dark:border-gray-700 flex-shrink-0">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Upload Document</h2>
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-8 text-center bg-gray-50 dark:bg-gray-800/50">
             <input
               ref={fileInputRef}
               type="file"
@@ -140,10 +192,10 @@ export default function Resources() {
               disabled={uploading}
             />
             <Upload className="mx-auto text-gray-400 mb-4" size={48} />
-            <h3 className="text-lg font-medium mb-2">
+            <h3 className="text-lg font-medium mb-2 text-gray-900 dark:text-white">
               {uploading ? 'Uploading...' : 'Choose a file to upload'}
             </h3>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               Supported formats: PDF, TXT, MD, DOC, DOCX
             </p>
             <button
@@ -165,50 +217,69 @@ export default function Resources() {
 
         {/* Error Display */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8">
-            <p className="text-sm text-red-600">{error}</p>
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-8 flex-shrink-0">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
           </div>
         )}
 
-        {/* Resources List */}
-        <div className="card">
-          <h2 className="text-xl font-semibold mb-4">Uploaded Documents</h2>
-          {resources.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <p>No documents uploaded yet</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {resources.map((resource) => (
-                <div
-                  key={resource.resource_id}
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center space-x-4 flex-1">
-                    <div className="flex items-center space-x-2">
-                      {getStatusIcon(resource.embeddingStatus?.status)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-gray-900 truncate">
-                        {resource.filename}
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        ID: {resource.resource_id.slice(0, 8)}... •{' '}
-                        {getStatusText(resource.embeddingStatus?.status)}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(resource.resource_id)}
-                    className="btn btn-secondary ml-4"
-                    title="Delete resource"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+        {/* Resources List Container */}
+        <div className="card bg-white dark:bg-gray-800 dark:border-gray-700 flex-1 flex flex-col min-h-0 overflow-hidden">
+          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white flex-shrink-0">Uploaded Documents</h2>
+          
+          {/* Scrollable List */}
+          <div className="flex-1 overflow-y-auto min-h-0 pr-2">
+            {resources.length === 0 && !loadingList ? (
+                <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                <p>No documents uploaded yet</p>
                 </div>
-              ))}
-            </div>
-          )}
+            ) : (
+                <div className="space-y-4">
+                {resources.map((resource) => (
+                    <div
+                    key={resource.id}
+                    className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                    >
+                    <div className="flex items-center space-x-4 flex-1">
+                        <div className="flex items-center space-x-2">
+                        {getStatusIcon(resource.status)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                        <h3 className="font-medium text-gray-900 dark:text-white truncate">
+                            {resource.filename}
+                        </h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                            ID: {resource.id.slice(0, 8)}... •{' '}
+                            {getStatusText(resource.status)}
+                        </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => handleDelete(resource.id)}
+                        className="btn btn-secondary ml-4 hover:bg-red-100 hover:text-red-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-red-900/30 dark:hover:text-red-400 border-none"
+                        title="Delete resource"
+                    >
+                        <Trash2 size={18} />
+                    </button>
+                    </div>
+                ))}
+                
+                {hasMore && (
+                    <button 
+                        onClick={() => fetchResources(page)}
+                        disabled={loadingList}
+                        className="w-full py-3 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-800 dark:hover:text-primary-300 disabled:opacity-50"
+                    >
+                        {loadingList ? (
+                            <span className="flex items-center justify-center">
+                                <Loader2 className="animate-spin mr-2" size={16} />
+                                Loading...
+                            </span>
+                        ) : 'Load More'}
+                    </button>
+                )}
+                </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
