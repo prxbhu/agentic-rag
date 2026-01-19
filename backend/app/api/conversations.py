@@ -6,11 +6,12 @@ import logging
 from typing import Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from langchain_core.messages import HumanMessage
 
 from app.database import get_db
 from app.config import settings
@@ -18,6 +19,9 @@ from app.agents.rag_agent import RAGAgent
 from app.services.search import SearchService
 from app.services.ranking import RankingService
 from app.services.citation import CitationService
+from app.services.hardware import HardwareDetector
+from app.services.llm_service import get_llm_service
+from app.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +46,30 @@ class Message(BaseModel):
     citations: list
     created_at: str
 
+# Helper Function
+async def generate_conversation_title(conversation_id: str, user_content: str, assistant_content: str, db: AsyncSession):
+    """Background task to generate a title for the conversation"""
+    try:
+        llm = get_llm_service()
+        prompt = f"""Summarize the following interaction into a short, concise title (max 5 words).
+        User: {user_content[:200]}
+        Assistant: {assistant_content[:200]}
+        Title:"""
+        
+        messages = [HumanMessage(content=prompt)]
+        title = await llm.generate(messages, temperature=0.7)
+        title = title.strip().strip('"')
 
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text("UPDATE conversations SET title = :title WHERE id = :id"),
+                {"title": title, "id": conversation_id}
+            )
+            await session.commit()
+            
+    except Exception as e:
+        logger.error(f"Failed to auto-generate title: {e}")
+        
 @router.post("")
 async def create_conversation(
     request: CreateConversationRequest,
@@ -51,7 +78,7 @@ async def create_conversation(
     """Create a new conversation"""
     try:
         conversation_id = uuid4()
-        
+        model_name = HardwareDetector.get_optimal_model()
         await db.execute(
             text("""
                 INSERT INTO conversations (id, workspace_id, title, model_name, system_prompt)
@@ -61,7 +88,7 @@ async def create_conversation(
                 "id": str(conversation_id),
                 "workspace_id": request.workspace_id,
                 "title": request.title or "New Conversation",
-                "model_name": settings.CHAT_MODEL,
+                "model_name": model_name,
                 "system_prompt": request.system_prompt
             }
         )
@@ -136,11 +163,76 @@ async def get_conversation(
         logger.error(f"Get conversation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/list")
+async def list_conversations(
+    db: AsyncSession = Depends(get_db)
+):
+    """List all conversations"""
+    try:
+        result = await db.execute(
+            text("""
+                SELECT id, workspace_id, title, model_name, created_at
+                FROM conversations
+                ORDER BY created_at DESC
+            """)
+        )
+        
+        conversations = []
+        for row in result.fetchall():
+            conversations.append({
+                "id": str(row.id),
+                "workspace_id": str(row.workspace_id),
+                "title": row.title,
+                "model_name": row.model_name,
+                "created_at": row.created_at.isoformat()
+            })
+        
+        return {"conversations": conversations}
+        
+    except Exception as e:
+        logger.error(f"List conversations failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/{conversation_id}/messages")
+async def get_messages(
+    conversation_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all messages in a conversation"""
+    try:
+        messages_result = await db.execute(
+            text("""
+                SELECT id, role, content, citations, created_at
+                FROM messages
+                WHERE conversation_id = :conversation_id
+                ORDER BY created_at ASC
+            """),
+            {"conversation_id": str(conversation_id)}
+        )
+        
+        messages = []
+        for row in messages_result.fetchall():
+            messages.append({
+                "id": str(row.id),
+                "role": row.role,
+                "content": row.content,
+                "citations": row.citations or [],
+                "created_at": row.created_at.isoformat()
+            })
+        
+        return {"messages": messages}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get messages failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{conversation_id}/messages")
 async def send_message(
     conversation_id: UUID,
     request: SendMessageRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """
