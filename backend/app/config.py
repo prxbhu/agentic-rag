@@ -60,7 +60,7 @@ class Settings(BaseSettings):
         description="Ollama API base URL"
     )
     CHAT_MODEL: str = Field(
-        default="gemma3n:e2b",
+        default="gemma3:4b",
         description="Default chat model"
     )
     GEMINI_API_KEY: Optional[str] = Field(
@@ -93,11 +93,11 @@ class Settings(BaseSettings):
     )
     
     # Ranking Configuration
-    BASE_RELEVANCE_WEIGHT: float = 0.40
-    CITATION_FREQ_WEIGHT: float = 0.15
-    RECENCY_WEIGHT: float = 0.15
-    SPECIFICITY_WEIGHT: float = 0.15
-    SOURCE_QUALITY_WEIGHT: float = 0.15
+    BASE_RELEVANCE_WEIGHT: float = 0.70
+    CITATION_FREQ_WEIGHT: float = 0.05
+    RECENCY_WEIGHT: float = 0.05
+    SPECIFICITY_WEIGHT: float = 0.10
+    SOURCE_QUALITY_WEIGHT: float = 0.10
     
     # Context Assembly
     DEFAULT_TOKEN_BUDGET: int = Field(
