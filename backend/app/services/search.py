@@ -210,37 +210,46 @@ class SearchService:
             )
             
             rows = result.fetchall()
+            if not rows:
+                return []
+            
+            chunk_ids = [str(r.chunk_id) for r in rows]
+            
+            chunk_sql = text("""
+                SELECT
+                    c.id as chunk_id, c.content, c.resource_id,
+                    c.chunk_metadata, c.citation_count, r.filename
+                FROM chunks c
+                JOIN resources r ON c.resource_id = r.id
+                WHERE c.workspace_id = :workspace_id
+                AND c.id = ANY(:chunk_ids)
+            """)
+            
+            chunk_result = await self.db.execute(
+                chunk_sql,
+                {"workspace_id": str(workspace_id), "chunk_ids": chunk_ids}
+            )
+            chunk_rows = chunk_result.fetchall()
+            chunk_map = {str(r.chunk_id): r for r in chunk_rows}
             
             # Fetch full chunk details
             results = []
             for row in rows:
-                chunk_sql = text("""
-                    SELECT 
-                        c.id, c.content, c.resource_id, c.chunk_metadata,
-                        c.citation_count, r.filename
-                    FROM chunks c
-                    JOIN resources r ON c.resource_id = r.id
-                    WHERE c.id = :chunk_id
-                """)
+                chunk = chunk_map.get(str(row.chunk_id))
+                if not chunk:
+                    continue
                 
-                chunk_result = await self.db.execute(
-                    chunk_sql,
-                    {"chunk_id": str(row.chunk_id)}
-                )
-                chunk = chunk_result.fetchone()
-                
-                if chunk:
-                    results.append({
-                        "chunk_id": chunk.id,
-                        "content": chunk.content,
-                        "resource_id": chunk.resource_id,
-                        "filename": chunk.filename,
-                        "metadata": chunk.chunk_metadata,
-                        "citation_count": chunk.citation_count,
-                        "combined_score": float(row.combined_score),
-                        "semantic_score": float(row.semantic_score),
-                        "bm25_score": float(row.bm25_score)
-                    })
+                results.append({
+                    "chunk_id": chunk.chunk_id,
+                    "content": chunk.content,
+                    "resource_id": chunk.resource_id,
+                    "filename": chunk.filename,
+                    "metadata": chunk.chunk_metadata,
+                    "citation_count": chunk.citation_count,
+                    "combined_score": float(row.combined_score),
+                    "semantic_score": float(row.semantic_score),
+                    "bm25_score": float(row.bm25_score)
+                })
             
             logger.info(f"Hybrid search returned {len(results)} results")
             return results
