@@ -199,7 +199,62 @@ async def upload_document(
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/list")
+async def list_resources(
+    workspace_id: Optional[UUID] = None,
+    limit: int = 20,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all resources, optionally filtered by workspace"""
+    try:
+        query = """
+            SELECT 
+                r.id, r.workspace_id, r.filename, r.file_type, r.file_size_bytes,
+                r.status, r.created_at, r.metadata,
+                COUNT(c.id) as chunk_count
+            FROM resources r
+            LEFT JOIN chunks c ON r.id = c.resource_id
+        """
 
+        params = {}
+
+        if workspace_id:
+            query += " WHERE r.workspace_id = :workspace_id"
+            params["workspace_id"] = str(workspace_id)
+
+        query += """
+            GROUP BY 
+                r.id, r.workspace_id, r.filename, r.file_type, r.file_size_bytes,
+                r.status, r.created_at, r.metadata
+            ORDER BY r.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+        params["limit"] = int(limit)
+        params["offset"] = int(offset)
+        result = await db.execute(text(query), params)
+
+        resources = []
+        for row in result.fetchall():
+            resources.append({
+                "id": str(row.id),
+                "workspace_id": str(row.workspace_id),
+                "filename": row.filename,
+                "file_type": row.file_type,
+                "file_size_bytes": row.file_size_bytes,
+                "status": row.status,
+                "chunk_count": row.chunk_count,
+                "created_at": row.created_at.isoformat(),
+                "metadata": row.metadata
+            })
+
+        return {"resources": resources}
+
+    except Exception as e:
+        logger.error(f"List resources failed: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+       
 @router.get("/{resource_id}/embedding-status")
 async def get_embedding_status(
     resource_id: UUID,
