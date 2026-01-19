@@ -38,6 +38,8 @@ class RAGState(TypedDict):
     response: str
     citations: List[Dict[str, Any]]
     metadata: Dict[str, Any]
+    context_sources: List[Dict[str, Any]]
+
     
     # Quality control
     self_reflection: Dict[str, Any]
@@ -129,8 +131,8 @@ class RAGAgent:
             }
         )
         
-        workflow.add_edge("refine_response", "generate_response")
-        workflow.add_edge("generate_response", END)
+        workflow.add_edge("refine_response", "verify_citations")
+        workflow.add_edge("verify_citations", END)
         
         return workflow.compile()
     
@@ -138,36 +140,13 @@ class RAGAgent:
         """Expand the user query into multiple variants"""
         logger.info(f"Expanding query: {state['query']}")
         
-        if len(state["query"].split()) < 5:
-                return {"expanded_queries": [state["query"]], "messages": []}
-            
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", QUERY_EXPANSION_PROMPT),
-            ("user", "{query}")
-        ])
-        
-        chain = prompt | self.llm
-        
         try:
-            response = await chain.ainvoke({"query": state["query"]})
-            variants = [v.strip() for v in response.content.strip().split("\n") if v.strip()]
-            queries = [state["query"]] + variants[:3]
-            return {"expanded_queries": queries, "messages": [HumanMessage(content=state["query"])]}
-            
-            # # Parse expanded queries (expecting line-separated variants)
-            # expanded = response.content.strip().split("\n")
-            # expanded_queries = [q.strip() for q in expanded if q.strip()]
-            
-            # # Ensure original query is included
-            # if state["query"] not in expanded_queries:
-            #     expanded_queries.insert(0, state["query"])
-            
-            # logger.info(f"Generated {len(expanded_queries)} query variants")
-            
-            # return {
-            #     "expanded_queries": expanded_queries[:5],  # Limit to 5 variants
-            #     "messages": [HumanMessage(content=state["query"])]
-            # }
+            sub_queries = await self.query_decomposer.decompose_query(state["query"])
+            # always include original query first
+            queries = [state["query"]] + [q for q in sub_queries if q != state["query"]]
+            logger.info(f"Expanded to {len(queries)} queries")
+            return {"expanded_queries": queries[:4], "messages": [HumanMessage(content=state["query"])]}
+        
         except Exception as e:
             logger.error(f"Query expansion failed: {e}")
             return {
@@ -182,38 +161,51 @@ class RAGAgent:
         all_results = []
         seen_chunk_ids = set()
         
-        for query in state["expanded_queries"]:
-            results = await self.search_service.hybrid_search(
-                query=query,
+        async def run_one(q: str):
+            return await self.search_service.hybrid_search(
+                query=q,
                 workspace_id=state["workspace_id"],
                 limit=settings.MAX_SEARCH_RESULTS
             )
-            
-            # Deduplicate while preserving order
-            for result in results:
-                if result["chunk_id"] not in seen_chunk_ids:
-                    all_results.append(result)
-                    seen_chunk_ids.add(result["chunk_id"])
+
+        for q in state["expanded_queries"]:
+            try:
+                results = await retry_with_backoff(lambda: run_one(q))
+            except Exception as e:
+                logger.warning(f"Hybrid search failed for query='{q}': {e}")
+                continue
+
+            for r in results:
+                cid = str(r["chunk_id"])
+                if cid not in seen_chunk_ids:
+                    all_results.append(r)
+                    seen_chunk_ids.add(cid)
+
+        validated, note = await ValidationService.validate_search_results(all_results)
+        if note:
+            logger.warning(f"Search validation note: {note}")
         
-        logger.info(f"Found {len(all_results)} unique search results")
+        logger.info(f"Found {len(validated)} unique search results")
         
         return {
-            "search_results": all_results[:50]  # Limit to top 50
+            "search_results": validated[:50]  # Limit to top 80
         }
 
     async def rerank_results(self, state: RAGState) -> Dict:
-        if not state["search_results"]:
+        docs = state.get("search_results") or []
+        if not docs:
             return {"reranked_results": []}
-        
-        # Use 'cross_encoder' if available (most accurate), else 'hybrid' (MMR + Semantic)
-        # For this specific case (Syllabus), Cross Encoder is best at matching "GATE 2026" specifically.
+
+        method = "cross_encoder" if len(docs) <= 25 else "hybrid"
+
         reranked = await self.reranking_service.rerank_documents(
             query=state["query"],
-            documents=state["search_results"],
-            method="cross_encoder", # Safer default "hybrid", falls back gracefully
+            documents=docs,
+            method=method,
             top_k=15
         )
-        
+        logger.info(f"Reranked results using method: {method}")
+        logger.info(f"len reranked: {len(reranked)}")
         return {"reranked_results": reranked}
     
     async def rank_results(self, state: RAGState) -> Dict:
@@ -247,6 +239,7 @@ class RAGAgent:
         
         context_parts = []
         total_tokens = 0
+        context_sources = []
         
         # Add primary sources (top-ranked)
         primary_sources = state["ranked_results"][:5]
@@ -255,6 +248,7 @@ class RAGAgent:
             chunk_tokens = len(chunk_text.split()) * 1.3  # Approximate tokens
             
             if total_tokens + chunk_tokens <= primary_budget:
+                context_sources.append(result)
                 context_parts.append(f"[Source {i}]\n{chunk_text}\n")
                 total_tokens += chunk_tokens
         
@@ -265,6 +259,7 @@ class RAGAgent:
             chunk_tokens = len(chunk_text.split()) * 1.3
             
             if total_tokens + chunk_tokens <= supporting_budget:
+                context_sources.append(result)
                 context_parts.append(f"[Source {i}]\n{chunk_text}\n")
                 total_tokens += chunk_tokens
         
@@ -273,7 +268,8 @@ class RAGAgent:
         logger.info(f"Assembled context with ~{int(total_tokens)} tokens")
         
         return {
-            "context": context
+            "context": context,
+            "context_sources": context_sources
         }
     
     async def generate_response(self, state: RAGState) -> Dict:
@@ -282,15 +278,20 @@ class RAGAgent:
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", RAG_SYSTEM_PROMPT),
-            ("user", """Context:
-            {context}
+            ("user", """
+            You MUST follow these rules:
+            1) Use ONLY facts from the Context.
+            2) Every factual sentence must end with a citation like [Source 1].
+            3) If the answer is not in Context at all, reply ONLY with: "Not found in the provided documents."
+            4) Do NOT add "Not found..." if you already answered using Context.
+            
+            Here is the information you have:
+            Context: {context}
 
             Question: {query}
 
-            Provide a comprehensive answer using ONLY the information from the provided context. 
-            Always cite sources using [Source N] format. If information is not in the context, 
-            state that it's not available.""")
-                    ])
+            Provide a detailed answer with citations.
+            """)])
         
         chain = prompt | self.llm
         
@@ -319,11 +320,11 @@ class RAGAgent:
         
         verification_results = await self.citation_service.verify_citations(
             response=state["response"],
-            sources=state["ranked_results"]
+            sources=state.get("context_sources", [])
         )
         
         citations = []
-        for result in state["ranked_results"][:5]:  # Top 5 sources
+        for result in state["context_sources"][:5]:  # Top 5 sources
             citations.append({
                 "chunk_id": result["chunk_id"],
                 "resource_id": result["resource_id"],
@@ -356,7 +357,25 @@ class RAGAgent:
     async def refine_response(self, state: RAGState) -> Dict:
         """Refine if needed"""
         logger.info("Refining response based on self-reflection...")
-        return {"refinement_count": state.get("refinement_count", 0) + 1}
+        prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a strict citation enforcer."),
+        ("user", """Fix the answer using ONLY the Context.
+                    Rules:
+                    - Remove any claim not supported by Context.
+                    - Every sentence MUST include [Source N].
+                    - If not enough info, output exactly: Not found in the provided documents.
+
+                    Context:
+                    {context}
+
+                    Original Answer:
+                    {answer}
+
+                    Return the corrected answer:""")])
+        
+        chain = prompt | self.llm
+        resp = await chain.ainvoke({"context": state["context"], "answer": state["response"]})
+        return {"response": resp.content, "refinement_count": state.get("refinement_count", 0) + 1}
     
     
     async def run(self, query: str, workspace_id: UUID, conversation_id: UUID) -> Dict:
