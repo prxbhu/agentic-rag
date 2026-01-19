@@ -5,6 +5,7 @@ import logging
 import re
 from typing import List, Dict, Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -119,9 +120,9 @@ class CitationService:
         sentences = re.split(r'(?<=[.!?])\s+', text)
         
         for sentence in sentences:
-            if f"[Source {source_num}]" in sentence:
+            if re.search(rf"\[Source\s+{source_num}\]", sentence, re.IGNORECASE):
                 # Remove the citation marker for verification
-                claim = sentence.replace(f"[Source {source_num}]", "").strip()
+                claim = re.sub(rf"\[Source\s+{source_num}\]", "", sentence, flags=re.IGNORECASE).strip()
                 if claim:
                     claims.append(claim)
         
@@ -154,12 +155,17 @@ class CitationService:
         # Extract key terms from claim (nouns, numbers, proper nouns)
         key_terms = self._extract_key_terms(claim_lower)
         
-        # Check if majority of key terms appear in source
-        matches = sum(1 for term in key_terms if term in source_lower)
-        match_ratio = matches / len(key_terms) if key_terms else 0
+        if not key_terms:
+            return True
+
+        hits = sum(1 for term in key_terms if term in source_lower)
         
-        # Threshold: at least 70% of key terms should match
-        return match_ratio >= 0.7
+        if len(key_terms) <= 4:
+            return hits >= 1
+        elif len(key_terms) <= 10:
+            return hits >= 2
+        else:
+            return hits >= 3
     
     def _extract_key_terms(self, text: str) -> List[str]:
         """
@@ -176,9 +182,12 @@ class CitationService:
             'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they'
         }
         
+        junk = {"source", "context", "question", "answer"}
+        
         # Split into words and filter
         words = re.findall(r'\b\w+\b', text.lower())
-        key_terms = [w for w in words if w not in stop_words and len(w) > 3]
+        key_terms = [w for w in words if w not in stop_words and len(w) > 2]
+        key_terms = [w for w in key_terms if w not in junk]
         
         # Also extract numbers and multi-word phrases
         numbers = re.findall(r'\d+(?:\.\d+)?', text)
@@ -196,41 +205,31 @@ class CitationService:
         uncited = []
         
         # Split into sentences
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
         
-        # Patterns that indicate factual claims
-        factual_patterns = [
-            r'\d+%',  # Percentages
-            r'\$\d+',  # Dollar amounts
-            r'\d{4}',  # Years
-            r'increase[ds]?',
-            r'decrease[ds]?',
-            r'according to',
-            r'study shows?',
-            r'research indicates?',
-            r'data shows?',
-            r'statistics reveal'
-        ]
+        
+        allowed_no_citation_phrases = {
+            "not found in the provided documents",
+            "not available in the provided documents",
+            "insufficient information in the provided documents",
+            "i don't have enough information in the provided documents",
+        }
         
         for sentence in sentences:
-            # Skip if it has a citation
-            if re.search(r'\[Source\s+\d+\]', sentence, re.IGNORECASE):
+            if not sentence.strip():
                 continue
-            
-            # Check if it matches factual patterns
-            is_factual = any(
-                re.search(pattern, sentence, re.IGNORECASE)
-                for pattern in factual_patterns
-            )
-            
-            if is_factual:
+
+            s_lower = sentence.strip().lower().rstrip(".")
+            if s_lower in allowed_no_citation_phrases:
+                continue
+            # if sentence has no citation marker, flag it
+            if not re.search(r'\[Source\s+\d+\]', sentence, re.IGNORECASE):
                 uncited.append(sentence.strip())
-        
+
         return uncited
     
     async def get_citation_statistics(self) -> Dict[str, Any]:
         """Get statistics about citation usage across the system"""
-        from sqlalchemy import text
         
         # Most cited chunks
         result = await self.db.execute(text("""
