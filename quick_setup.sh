@@ -153,11 +153,11 @@ fi
 print_header "Step 7: Pulling Ollama Model"
 
 print_info "Pulling Mistral 7B model (this may take a few minutes)..."
-if docker exec rag_ollama ollama pull mistral:7b-instruct-q4_0; then
+if docker exec rag_ollama ollama pull gemma3:4b; then
     print_success "Ollama model downloaded"
 else
     print_warning "Failed to pull Ollama model. You can do this manually later:"
-    print_warning "  docker exec rag_ollama ollama pull mistral:7b-instruct-q4_0"
+    print_warning "  docker exec rag_ollama ollama pull gemma3:4b"
 fi
 
 # Step 8: Verify setup
