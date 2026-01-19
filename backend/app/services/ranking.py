@@ -48,9 +48,17 @@ class RankingService:
         # Enrich results with additional metadata
         enriched_results = await self._enrich_results(results)
         
+        max_combined = max((r.get("combined_score", 0.0) or 0.0) for r in enriched_results) or 1.0
+        max_citations = max((r.get("citation_count", 0) or 0) for r in enriched_results) or 1
+
+        norm = {
+        "max_combined": float(max_combined),
+        "max_citations": float(max_citations),
+        }
+
         # Calculate individual factor scores
         for result in enriched_results:
-            scores = self._calculate_factor_scores(result, enriched_results)
+            scores = self._calculate_factor_scores(result, enriched_results, norm)
             result.update(scores)
             
             # Calculate final weighted score
@@ -117,17 +125,21 @@ class RankingService:
     def _calculate_factor_scores(
         self,
         result: Dict[str, Any],
-        all_results: List[Dict[str, Any]]
+        all_results: List[Dict[str, Any]],
+        norm: Dict[str, float]
     ) -> Dict[str, float]:
         """Calculate individual factor scores for a result"""
         
         # 1. Base relevance (normalized from hybrid search score)
-        base_relevance = result.get("combined_score", 0.5)
+        raw = result.get("combined_score", 0.0) or 0.0
+        base_relevance = raw / (norm["max_combined"] + 1e-9)
+        base_relevance = max(0.0, min(1.0, base_relevance))
         
         # 2. Citation frequency (normalized)
-        citation_count = result.get("citation_count", 0)
-        max_citations = max(r.get("citation_count", 0) for r in all_results) or 1
-        citation_frequency = min(citation_count / max_citations, 1.0)
+        citation_count = result.get("citation_count", 0) or 0
+        citation_frequency = citation_count / (norm["max_citations"] + 1e-9)
+        citation_frequency = max(0.0, min(1.0, citation_frequency))
+        citation_frequency = min(citation_frequency, 0.6) # cap citation influence so it doesn't dominate relevance
         
         # 3. Recency score (exponential decay)
         created_at = result.get("resource_created_at") or datetime.now()
