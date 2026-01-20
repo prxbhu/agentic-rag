@@ -258,98 +258,97 @@ async def send_message(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Send a message and get RAG response
-    """
-    try:
-        # Verify conversation exists and get title
-        conv_result = await db.execute(
-            text("SELECT id, title FROM conversations WHERE id = :id"),
-            {"id": str(conversation_id)}
-        )
-        conv = conv_result.fetchone()
-        if not conv:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        
-        # Store user message
-        user_message_id = uuid4()
-        await db.execute(
-            text("""
-                INSERT INTO messages (id, conversation_id, role, content)
-                VALUES (:id, :conversation_id, 'user', :content)
-            """),
-            {
-                "id": str(user_message_id),
-                "conversation_id": str(conversation_id),
-                "content": request.content
-            }
-        )
-        await db.commit()
-        
-        # Initialize services
-        search_service = SearchService(db)
-        ranking_service = RankingService(db)
-        citation_service = CitationService(db)
-        
-        # Initialize RAG agent
-        rag_agent = RAGAgent(search_service, ranking_service, citation_service)
-        
-        # Run RAG pipeline
-        logger.info(f"Running RAG pipeline for conversation {conversation_id}")
-        result = await rag_agent.run(
-            query=request.content,
-            workspace_id=UUID(request.workspace_id),
-            conversation_id=conversation_id
-        )
-        
-        # Store assistant message
-        assistant_message_id = uuid4()
-        await db.execute(
-            text("""
-                INSERT INTO messages (id, conversation_id, role, content, 
-                                    citations, source_chunks, model_metadata)
-                VALUES (:id, :conversation_id, 'assistant', :content, 
-                        CAST(:citations AS JSONB), :source_chunks, CAST(:metadata AS JSONB))
-            """),
-            {
-                "id": str(assistant_message_id),
-                "conversation_id": str(conversation_id),
-                "content": result["response"],
-                "citations": json.dumps(result["citations"], default=str),
-                "source_chunks": [str(c["chunk_id"]) for c in result["citations"]],
-                "metadata": json.dumps(result["metadata"], default=str)
-            }
-        )
-        await db.commit()
-        
-        # Update citation counts
-        for citation in result["citations"]:
-            await ranking_service.update_citation_count(citation["chunk_id"])
-            
-        # Trigger title generation if it's the first exchange (title is "New Conversation")
-        if conv.title == "New Conversation":
-            background_tasks.add_task(
-                generate_conversation_title, 
-                str(conversation_id), 
-                request.content, 
-                result["response"]
+    async def generator():
+        try:
+            # Verify conversation exists
+            conv_result = await db.execute(
+                text("SELECT id, title FROM conversations WHERE id = :id"),
+                {"id": str(conversation_id)}
             )
-        
-        return {
-            "message_id": str(assistant_message_id),
-            "role": "assistant",
-            "content": result["response"],
-            "citations": result["citations"],
-            "metadata": result["metadata"]
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Send message failed: {e}")
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+            conv = conv_result.fetchone()
+            if not conv:
+                yield json.dumps({"type": "error", "data": "Conversation not found"}) + "\n"
+                return
 
+            # Store user message
+            user_message_id = uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO messages (id, conversation_id, role, content)
+                    VALUES (:id, :conversation_id, 'user', :content)
+                """),
+                {
+                    "id": str(user_message_id),
+                    "conversation_id": str(conversation_id),
+                    "content": request.content
+                }
+            )
+            await db.commit()
+
+            # Initialize services + agent
+            search_service = SearchService(db)
+            ranking_service = RankingService(db)
+            citation_service = CitationService(db)
+            rag_agent = RAGAgent(search_service, ranking_service, citation_service)
+
+            # Stream tokens from LLM
+            assistant_text = ""
+            final_payload = None
+
+            async for event in rag_agent.run_stream(
+                query=request.content,
+                workspace_id=UUID(request.workspace_id),
+                conversation_id=conversation_id
+            ):
+                if event["type"] == "content":
+                    assistant_text += event["data"]
+
+                if event["type"] == "end":
+                    final_payload = event
+
+                yield json.dumps(event, default=str) + "\n"
+
+            # Save assistant message after streaming ends
+            if final_payload:
+                assistant_message_id = uuid4()
+
+                await db.execute(
+                    text("""
+                        INSERT INTO messages (id, conversation_id, role, content, citations, source_chunks, model_metadata)
+                        VALUES (:id, :conversation_id, 'assistant', :content,
+                                CAST(:citations AS JSONB), :source_chunks, CAST(:metadata AS JSONB))
+                    """),
+                    {
+                        "id": str(assistant_message_id),
+                        "conversation_id": str(conversation_id),
+                        "content": assistant_text,
+                        "citations": json.dumps(final_payload.get("citations", []), default=str),
+                        "source_chunks": [str(c["chunk_id"]) for c in final_payload.get("citations", [])],
+                        "metadata": json.dumps(final_payload.get("metadata", {}), default=str),
+                    }
+                )
+                await db.commit()
+
+                # Send message_id in final event
+                yield json.dumps({
+                    "type": "message_id",
+                    "data": str(assistant_message_id)
+                }) + "\n"
+
+                # Title generation (first exchange)
+                if conv.title == "New Conversation":
+                    background_tasks.add_task(
+                        generate_conversation_title,
+                        str(conversation_id),
+                        request.content,
+                        assistant_text
+                    )
+
+        except Exception as e:
+            logger.exception("Streaming send_message failed")
+            yield json.dumps({"type": "error", "data": str(e)}) + "\n"
+
+    return StreamingResponse(generator(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 @router.get("/{conversation_id}/export")
 async def export_conversation(

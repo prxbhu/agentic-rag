@@ -2,7 +2,7 @@
 LangGraph-based RAG agent for orchestrating the retrieval pipeline
 """
 import logging
-from typing import TypedDict, List, Dict, Any, Annotated
+from typing import TypedDict, List, Dict, Any, Annotated, AsyncGenerator
 from uuid import UUID
 import operator
 
@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import StrOutputParser
 
 from app.config import settings
 from app.services.hardware import HardwareDetector
@@ -406,3 +407,114 @@ class RAGAgent:
         except Exception as e:
             logger.error(f"RAG pipeline failed: {e}")
             raise
+        
+    async def run_stream(
+        self,
+        query: str,
+        workspace_id: UUID,
+        conversation_id: UUID
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Stream tokens directly from the LLM while still running full RAG pipeline.
+        Yields events: status/content/end/error
+        """
+
+        # Build initial state
+        state: RAGState = {
+            "query": query,
+            "workspace_id": workspace_id,
+            "conversation_id": conversation_id,
+            "expanded_queries": [],
+            "search_results": [],
+            "reranked_results": [],
+            "ranked_results": [],
+            "context": "",
+            "response": "",
+            "citations": [],
+            "metadata": {},
+            "context_sources": [],
+            "self_reflection": {},
+            "needs_refinement": False,
+            "refinement_count": 0,
+            "messages": []
+        }
+
+        try:
+            yield {"type": "status", "data": "Expanding query..."}
+            out = await self.expand_query(state)
+            state.update(out)
+
+            yield {"type": "status", "data": "Searching documents..."}
+            out = await self.hybrid_search(state)
+            state.update(out)
+
+            yield {"type": "status", "data": "Reranking results..."}
+            out = await self.rerank_results(state)
+            state.update(out)
+
+            yield {"type": "status", "data": "Ranking results..."}
+            out = await self.rank_results(state)
+            state.update(out)
+
+            yield {"type": "status", "data": "Assembling context..."}
+            out = await self.assemble_context(state)
+            state.update(out)
+
+            # --- REAL TOKEN STREAMING STARTS HERE ---
+            yield {"type": "status", "data": "Generating answer..."}
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", RAG_SYSTEM_PROMPT),
+                ("user", """
+                You MUST follow these rules:
+                1) Use ONLY facts from the Context.
+                2) Every factual sentence must end with a citation like [Source 1].
+                3) If the answer is not in Context at all, reply ONLY with: "Not found in the provided documents."
+                4) Do NOT add "Not found..." if you already answered using Context.
+
+                Here is the information you have:
+                Context: {context}
+
+                Question: {query}
+
+                Provide a detailed answer with citations.
+                """)
+            ])
+
+            chain = prompt | self.llm  
+
+            full_text = ""
+            async for chunk in chain.astream({
+                "context": state["context"],
+                "query": state["query"]
+            }):
+                token = getattr(chunk, "content", "") or ""
+                if token:
+                    full_text += token
+                    yield {"type": "content", "data": token}
+
+            state["response"] = full_text
+
+            yield {"type": "status", "data": "Verifying citations..."}
+            out = await self.verify_citations(state)
+            state.update(out)
+
+            yield {"type": "status", "data": "Finalizing..."}
+            out = await self.self_reflect(state)
+            state.update(out)
+
+            if state.get("needs_refinement") and state.get("refinement_count", 0) < 1:
+                out = await self.refine_response(state)
+                state.update(out)
+                out = await self.verify_citations(state)
+                state.update(out)
+
+            yield {
+                "type": "end",
+                "response": state["response"],
+                "citations": state.get("citations", []),
+                "metadata": state.get("metadata", {})
+            }
+
+        except Exception as e:
+            logger.exception("run_stream failed")
+            yield {"type": "error", "data": str(e)}

@@ -47,9 +47,10 @@ export interface Message {
 }
 
 export interface Citation {
-  source: string;
-  content: string;
-  score?: number;
+  chunk_id: string;
+  resource_id: string;
+  content_preview: string;
+  relevance_score?: number;
 }
 
 export interface UploadResponse {

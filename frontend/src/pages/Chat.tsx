@@ -292,7 +292,7 @@ export default function Chat() {
                               className="text-xs text-gray-600 dark:text-gray-300 mb-1 flex items-start space-x-2"
                             >
                               <span className="font-medium">[{idx + 1}]</span>
-                              <span>{citation.source}</span>
+                              <span>{citation.content_preview}</span>
                             </div>
                           ))}
                         </div>
