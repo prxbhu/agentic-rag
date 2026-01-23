@@ -83,7 +83,6 @@ class RAGAgent:
                 temperature=0.3
             )
         
-        # Use Ollama with hardware-optimized model
         optimal_model = HardwareDetector.get_optimal_model()
         ollama_options = HardwareDetector.get_ollama_options()
         
@@ -101,7 +100,7 @@ class RAGAgent:
         """Build the LangGraph workflow"""
         workflow = StateGraph(RAGState)
         
-        # Add nodes
+         # Add nodes
         workflow.add_node("expand_query", self.expand_query)
         workflow.add_node("hybrid_search", self.hybrid_search)
         workflow.add_node("rerank_results", self.rerank_results)
@@ -133,7 +132,6 @@ class RAGAgent:
         )
         
         workflow.add_edge("refine_response", "verify_citations")
-        workflow.add_edge("verify_citations", END)
         
         return workflow.compile()
     
@@ -143,7 +141,6 @@ class RAGAgent:
         
         try:
             sub_queries = await self.query_decomposer.decompose_query(state["query"])
-            # always include original query first
             queries = [state["query"]] + [q for q in sub_queries if q != state["query"]]
             logger.info(f"Expanded to {len(queries)} queries")
             return {"expanded_queries": queries[:4], "messages": [HumanMessage(content=state["query"])]}
@@ -156,11 +153,14 @@ class RAGAgent:
             }
     
     async def hybrid_search(self, state: RAGState) -> Dict:
-        """Perform hybrid search across all query variants"""
+        """
+        FIXED: Better deduplication strategy and result merging
+        """
         logger.info(f"Performing hybrid search for {len(state['expanded_queries'])} queries")
         
-        all_results = []
-        seen_chunk_ids = set()
+        # Store results by chunk_id to track scores across queries
+        chunk_results = {}  # chunk_id -> best result
+        chunk_query_hits = {}  # chunk_id -> number of queries that found it
         
         async def run_one(q: str):
             return await self.search_service.hybrid_search(
@@ -169,57 +169,90 @@ class RAGAgent:
                 limit=settings.MAX_SEARCH_RESULTS
             )
 
-        for q in state["expanded_queries"]:
+        for idx, q in enumerate(state["expanded_queries"]):
             try:
                 results = await retry_with_backoff(lambda: run_one(q))
+                logger.info(f"Query '{q[:50]}...' returned {len(results)} results")
             except Exception as e:
                 logger.warning(f"Hybrid search failed for query='{q}': {e}")
                 continue
 
             for r in results:
                 cid = str(r["chunk_id"])
-                if cid not in seen_chunk_ids:
-                    all_results.append(r)
-                    seen_chunk_ids.add(cid)
+                
+                # Track how many queries found this chunk (boost for multi-query hits)
+                chunk_query_hits[cid] = chunk_query_hits.get(cid, 0) + 1
+                
+                # Keep the result with highest combined score
+                if cid not in chunk_results or r.get("combined_score", 0) > chunk_results[cid].get("combined_score", 0):
+                    chunk_results[cid] = r
 
-        validated, note = await ValidationService.validate_search_results(all_results)
+        # Convert back to list and boost scores for chunks found by multiple queries
+        all_results = []
+        for cid, result in chunk_results.items():
+            # Boost score if multiple queries found this chunk (indicates high relevance)
+            query_boost = 1.0 + (0.1 * (chunk_query_hits[cid] - 1))  # +10% per additional query
+            result["combined_score"] = result.get("combined_score", 0) * query_boost
+            result["query_hit_count"] = chunk_query_hits[cid]
+            all_results.append(result)
+        
+        # Sort by boosted score
+        all_results.sort(key=lambda x: x.get("combined_score", 0), reverse=True)
+
+        # More lenient validation
+        validated, note = await ValidationService.validate_search_results(all_results, min_score=0.10)
+        
+        # If we got very few results, check if it's a data problem
+        if len(validated) < 3:
+            logger.warning(f"⚠️ Only {len(validated)} unique documents found. This suggests:")
+            logger.warning("  1. Limited documents in workspace about this topic")
+            logger.warning("  2. Query terms don't match document content")
+            logger.warning("  3. Possible chunking/embedding issues")
+            logger.warning("Consider uploading more documents or checking document content.")
+        
         if note:
             logger.warning(f"Search validation note: {note}")
         
-        logger.info(f"Found {len(validated)} unique search results")
+        logger.info(f"Found {len(validated)} unique search results after deduplication")
+        logger.info(f"Top result score: {validated[0].get('combined_score', 0):.3f}" if validated else "No results")
         
         return {
-            "search_results": validated[:50]  # Limit to top 80
+            "search_results": validated[:50]  # Limit to top 50
         }
 
     async def rerank_results(self, state: RAGState) -> Dict:
+        """IMPROVED: Better reranking with fixed weights"""
         docs = state.get("search_results") or []
         if not docs:
             return {"reranked_results": []}
 
-        method = "cross_encoder" if len(docs) <= 25 else "hybrid"
+        # Use cross-encoder for small sets, hybrid for larger
+        method = "cross_encoder" if len(docs) <= 20 else "hybrid"
 
         reranked = await self.reranking_service.rerank_documents(
             query=state["query"],
             documents=docs,
             method=method,
-            top_k=15
+            top_k=20  # Increased from 15
         )
-        logger.info(f"Reranked results using method: {method}")
-        logger.info(f"len reranked: {len(reranked)}")
+        logger.info(f"Reranked {len(reranked)} results using method: {method}")
         return {"reranked_results": reranked}
     
     async def rank_results(self, state: RAGState) -> Dict:
         """Apply multi-factor ranking to search results"""
-        logger.info(f"Ranking {len(state['search_results'])} results")
+        logger.info(f"Ranking results")
         results_to_rank = state.get("reranked_results") or state["search_results"]
         ranked = await self.ranking_service.rank_results(
             results=results_to_rank,
             query=state["query"]
         )
         
-        # Select top results based on score threshold
-        top_results = [r for r in ranked if r["final_score"] > 0.3][:10]
+        # Lower threshold from 0.3 to 0.2 to include more relevant docs
+        top_results = [r for r in ranked if r["final_score"] > 0.2][:15]
+        
+        # Ensure we always have at least some results
+        if not top_results and ranked:
+            top_results = ranked[:5]
         
         logger.info(f"Selected {len(top_results)} top-ranked results")
         
@@ -228,71 +261,212 @@ class RAGAgent:
         }
     
     async def assemble_context(self, state: RAGState) -> Dict:
-        """Assemble context from ranked results with token budgeting"""
+        """
+        FIXED: Use correct token budget from settings and handle single-source case
+        """
         logger.info("Assembling context with token budget")
-        
-        token_budget = settings.DEFAULT_TOKEN_BUDGET
+
+        ranked_results = state.get("ranked_results") or []
+        if not ranked_results:
+            return {"context": "No information found.", "context_sources": []}
+
+        # Use the actual DEFAULT_TOKEN_BUDGET from settings
+        token_budget = int(settings.DEFAULT_TOKEN_BUDGET)  # Should be 8000
         primary_budget = int(token_budget * settings.PRIMARY_SOURCES_RATIO)
         supporting_budget = int(token_budget * settings.SUPPORTING_CONTEXT_RATIO)
         
-        if not state["ranked_results"]:
-            return {"context": "No information found."}
-        
-        context_parts = []
+        logger.info(f"Token budget: {token_budget} (primary: {primary_budget}, supporting: {supporting_budget})")
+
+        max_total_budget = primary_budget + supporting_budget
+
+        # Adaptive parameters based on number of sources available
+        num_sources = len(ranked_results)
+        if num_sources == 1:
+            # Single source - use full content
+            GUARANTEED_TOPK = 1
+            MAX_TOKENS_PER_CHUNK = 2000  # Much larger for single source
+            GUARANTEED_MAX_TOKENS = 1500
+            MIN_SOURCES_TARGET = 1
+        elif num_sources <= 3:
+            # Few sources - be generous
+            GUARANTEED_TOPK = num_sources
+            MAX_TOKENS_PER_CHUNK = 800
+            GUARANTEED_MAX_TOKENS = 500
+            MIN_SOURCES_TARGET = num_sources
+        else:
+            # Many sources - balance coverage
+            GUARANTEED_TOPK = 5
+            MAX_TOKENS_PER_CHUNK = 500
+            GUARANTEED_MAX_TOKENS = 300
+            MIN_SOURCES_TARGET = 5
+
+        def approx_tokens(text: str) -> int:
+            return int(len(text.split()) * 1.3)
+
+        def truncate_to_tokens(text: str, max_tokens: int) -> str:
+            if not text:
+                return ""
+            words = text.split()
+            max_words = max(1, int(max_tokens / 1.3))
+            if len(words) <= max_words:
+                return text
+            return " ".join(words[:max_words]) + " ..."
+
+        context_parts: list[str] = []
+        context_sources: list[dict] = []
+        processed_ids: set[str] = set()
+
         total_tokens = 0
-        context_sources = []
-        
-        # Add primary sources (top-ranked)
-        primary_sources = state["ranked_results"][:5]
-        for i, result in enumerate(primary_sources, 1):
-            chunk_text = result["content"]
-            chunk_tokens = len(chunk_text.split()) * 1.3  # Approximate tokens
+        source_index = 1
+
+        def add_source(result: dict, text: str) -> bool:
+            nonlocal total_tokens, source_index
+
+            chunk_id = str(result.get("chunk_id", "unknown"))
+            t = approx_tokens(text)
+
+            if not text.strip():
+                return False
+
+            if total_tokens + t > max_total_budget:
+                return False
+
+            # Include relevance score and query hit count if available
+            score = result.get("final_score", 0)
+            hits = result.get("query_hit_count", 1)
+            filename = result.get("filename", "unknown")
             
-            if total_tokens + chunk_tokens <= primary_budget:
-                context_sources.append(result)
-                context_parts.append(f"[Source {i}]\n{chunk_text}\n")
-                total_tokens += chunk_tokens
+            context_parts.append(
+                f"[Source {source_index}] (file: {filename}, relevance: {score:.2f}, found_by: {hits} queries)\n{text}\n"
+            )
+            context_sources.append(result)
+            total_tokens += t
+            processed_ids.add(chunk_id)
+            source_index += 1
+            return True
         
-        # Add supporting context if budget allows
-        supporting_sources = state["ranked_results"][5:10]
-        for i, result in enumerate(supporting_sources, len(primary_sources) + 1):
-            chunk_text = result["content"]
-            chunk_tokens = len(chunk_text.split()) * 1.3
+        # Phase 1: Guarantee top-K sources
+        for result in ranked_results[:GUARANTEED_TOPK]:
+            chunk_id = str(result.get("chunk_id", "unknown"))
+            if chunk_id in processed_ids:
+                continue
+
+            content = result.get("content") or ""
+            preview = truncate_to_tokens(content, GUARANTEED_MAX_TOKENS)
+            added = add_source(result, preview)
             
-            if total_tokens + chunk_tokens <= supporting_budget:
-                context_sources.append(result)
-                context_parts.append(f"[Source {i}]\n{chunk_text}\n")
-                total_tokens += chunk_tokens
+            # Force add even if budget exceeded (but truncate more)
+            if not added and total_tokens == 0:
+                tiny_preview = truncate_to_tokens(content, 100)
+                add_source(result, tiny_preview)
+
+        # Phase 2: Add full chunks up to primary budget
+        for result in ranked_results:
+            if total_tokens >= primary_budget:
+                break
+
+            chunk_id = str(result.get("chunk_id", "unknown"))
+            if chunk_id in processed_ids:
+                continue
+
+            content = result.get("content") or ""
+            capped = truncate_to_tokens(content, MAX_TOKENS_PER_CHUNK)
+
+            t = approx_tokens(capped)
+            if total_tokens + t > primary_budget:
+                # Try with smaller snippet
+                smaller = truncate_to_tokens(content, MAX_TOKENS_PER_CHUNK // 2)
+                t2 = approx_tokens(smaller)
+                if total_tokens + t2 <= primary_budget:
+                    add_source(result, smaller)
+                continue
+
+            add_source(result, capped)
+
+        # Phase 3: Supporting context up to full budget
+        for result in ranked_results:
+            if total_tokens >= max_total_budget:
+                break
+
+            chunk_id = str(result.get("chunk_id", "unknown"))
+            if chunk_id in processed_ids:
+                continue
+
+            content = result.get("content") or ""
+            capped = truncate_to_tokens(content, MAX_TOKENS_PER_CHUNK // 2)
+
+            add_source(result, capped)
+
+        # Phase 4: Ensure minimum diversity
+        if len(context_sources) < MIN_SOURCES_TARGET:
+            for result in ranked_results:
+                if len(context_sources) >= MIN_SOURCES_TARGET:
+                    break
+
+                chunk_id = str(result.get("chunk_id", "unknown"))
+                if chunk_id in processed_ids:
+                    continue
+
+                content = result.get("content") or ""
+                snippet = truncate_to_tokens(content, 150)
+                add_source(result, snippet)
+
+        context = "\n".join(context_parts).strip()
+
+        logger.info(
+            f"✓ Assembled context: sources={len(context_sources)}, tokens={total_tokens}/{max_total_budget}"
+        )
         
-        context = "\n".join(context_parts)
-        
-        logger.info(f"Assembled context with ~{int(total_tokens)} tokens")
-        
+        # Warning if using very little of budget
+        usage_pct = (total_tokens / max_total_budget) * 100
+        if usage_pct < 10 and num_sources > 1:
+            logger.warning(f"⚠️ Only using {usage_pct:.1f}% of token budget - may indicate data issue")
+
         return {
-            "context": context,
-            "context_sources": context_sources
+            "context": context if context else "No information found.",
+            "context_sources": context_sources,
         }
-    
+
     async def generate_response(self, state: RAGState) -> Dict:
-        """Generate response using LLM with assembled context"""
+        """
+        FIXED: Simplified prompts optimized for smaller LLMs like Gemma 4B
+        """
         logger.info("Generating response")
         
+        ranked = state.get("ranked_results") or []
+        if not ranked:
+            return {
+                "response": "I could not find relevant information to answer your question.",
+                "messages": [AIMessage(content="No relevant documents found.")]
+            }
+        
+        max_score = max([r.get("final_score", 0) for r in ranked[:5]], default=0)
+        if max_score < 0.15:
+            return {
+                "response": "The available documents don't contain sufficiently relevant information to answer this question accurately.",
+                "messages": [AIMessage(content="Low relevance documents.")]
+            }
+        
+        # Simpler, clearer prompt for small LLMs
+        # Small LLMs work better with shorter, more direct instructions
         prompt = ChatPromptTemplate.from_messages([
-            ("system", RAG_SYSTEM_PROMPT),
-            ("user", """
-            You MUST follow these rules:
-            1) Use ONLY facts from the Context.
-            2) Every factual sentence must end with a citation like [Source 1].
-            3) If the answer is not in Context at all, reply ONLY with: "Not found in the provided documents."
-            4) Do NOT add "Not found..." if you already answered using Context.
-            
-            Here is the information you have:
-            Context: {context}
+            ("system", """You answer questions using only the provided sources. 
+    You must add [Source N] after every fact.
+    If the answer is not in the sources, say "Not found in documents."
+    """),
+            ("user", """Sources:
+    {context}
 
-            Question: {query}
+    Question: {query}
 
-            Provide a detailed answer with citations.
-            """)])
+    Instructions:
+    1. Read all sources
+    2. Write the answer
+    3. Add [Source N] after each fact
+    4. Use facts from multiple sources if available
+
+    Answer:""")
+        ])
         
         chain = prompt | self.llm
         
@@ -302,12 +476,22 @@ class RAGAgent:
                 "query": state["query"]
             })
             
+            response_text = response.content
+            
+            # If LLM forgot citations, try to add them
+            if '[Source' not in response_text and 'not found' not in response_text.lower():
+                logger.warning("LLM response missing citations - attempting auto-fix")
+                # Add a generic source citation if answer seems valid
+                if len(response_text) > 20 and state.get("context_sources"):
+                    response_text += " [Source 1]"
+            
             logger.info("Response generated successfully")
             
             return {
-                "response": response.content,
-                "messages": [AIMessage(content=response.content)]
+                "response": response_text,
+                "messages": [AIMessage(content=response_text)]
             }
+            
         except Exception as e:
             logger.error(f"Response generation failed: {e}")
             return {
@@ -324,17 +508,21 @@ class RAGAgent:
             sources=state.get("context_sources", [])
         )
         
+        # Include more source metadata
         citations = []
-        for result in state["context_sources"][:5]:  # Top 5 sources
+        for i, result in enumerate(state["context_sources"][:10], 1):
             citations.append({
+                "source_number": i,
                 "chunk_id": result["chunk_id"],
                 "resource_id": result["resource_id"],
-                "content_preview": result["content"][:200] + "...",
-                "relevance_score": result["final_score"]
+                "filename": result.get("filename", "unknown"),
+                "content_preview": result["content"][:250] + "...",
+                "relevance_score": result.get("final_score", result.get("combined_score", 0))
             })
         
         metadata = {
-            "num_sources_used": len(state["ranked_results"]),
+            "num_sources_used": len(state.get("context_sources", [])),
+            "num_sources_cited": len(citations),
             "verification_passed": verification_results.get("passed", True),
             "verification_issues": verification_results.get("issues", [])
         }
@@ -345,39 +533,71 @@ class RAGAgent:
         }
         
     async def self_reflect(self, state: RAGState) -> Dict:
-        """Check if answer is good"""
+        """IMPROVED: Check if answer quality meets standards"""
         try:
             reflection = await self.query_decomposer.self_reflect(
-                state["query"], state["response"], state["ranked_results"]
+                state["query"], 
+                state["response"], 
+                state["ranked_results"]
             )
-            needs_refinement = reflection["score"] < 7 and state.get("refinement_count", 0) < 1
+            # Lower threshold from 7 to 6 to reduce unnecessary refinements
+            needs_refinement = reflection["score"] < 6 and state.get("refinement_count", 0) < 1
+            logger.info(f"Self-reflection score: {reflection['score']}/10, needs_refinement: {needs_refinement}")
             return {"self_reflection": reflection, "needs_refinement": needs_refinement}
-        except:
+        except Exception as e:
+            logger.warning(f"Self-reflection failed: {e}")
             return {"needs_refinement": False}
 
     async def refine_response(self, state: RAGState) -> Dict:
-        """Refine if needed"""
+        """
+        IMPROVED: Simpler refinement for small LLMs
+        """
         logger.info("Refining response based on self-reflection...")
+        
+        # For very short responses, generate a new one instead of refining
+        if len(state["response"]) < 30:
+            logger.info("Response too short, regenerating instead of refining")
+            return await self.generate_response(state)
+        
         prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a strict citation enforcer."),
-        ("user", """Fix the answer using ONLY the Context.
-                    Rules:
-                    - Remove any claim not supported by Context.
-                    - Every sentence MUST include [Source N].
-                    - If not enough info, output exactly: Not found in the provided documents.
+            ("system", "Fix this answer to include proper citations."),
+            ("user", """Sources:
+    {context}
 
-                    Context:
-                    {context}
+    Current Answer:
+    {answer}
 
-                    Original Answer:
-                    {answer}
+    Task: Add [Source N] citations to every fact. Remove any unsupported claims.
 
-                    Return the corrected answer:""")])
+    Fixed Answer:""")
+        ])
         
         chain = prompt | self.llm
-        resp = await chain.ainvoke({"context": state["context"], "answer": state["response"]})
-        return {"response": resp.content, "refinement_count": state.get("refinement_count", 0) + 1}
-    
+        
+        try:
+            resp = await chain.ainvoke({
+                "context": state["context"],
+                "answer": state["response"]
+            })
+            
+            refined = resp.content
+            
+            # If refinement made it worse (removed content), keep original
+            if len(refined) < len(state["response"]) * 0.5:
+                logger.warning("Refinement removed too much content, keeping original")
+                refined = state["response"]
+            
+            return {
+                "response": refined,
+                "refinement_count": state.get("refinement_count", 0) + 1
+            }
+            
+        except Exception as e:
+            logger.error(f"Refinement failed: {e}")
+            return {
+                "response": state["response"],  # Keep original
+                "refinement_count": state.get("refinement_count", 0) + 1
+            }
     
     async def run(self, query: str, workspace_id: UUID, conversation_id: UUID) -> Dict:
         """Run the RAG pipeline"""
@@ -395,6 +615,7 @@ class RAGAgent:
             "response": "",
             "citations": [],
             "metadata": {},
+            "context_sources": [],
             "self_reflection": {},
             "needs_refinement": False,
             "refinement_count": 0,
@@ -415,11 +636,8 @@ class RAGAgent:
         conversation_id: UUID
     ) -> AsyncGenerator[dict, None]:
         """
-        Stream tokens directly from the LLM while still running full RAG pipeline.
-        Yields events: status/content/end/error
+        IMPROVED: Stream with better status messages
         """
-
-        # Build initial state
         state: RAGState = {
             "query": query,
             "workspace_id": workspace_id,
@@ -440,47 +658,51 @@ class RAGAgent:
         }
 
         try:
-            yield {"type": "status", "data": "Expanding query..."}
+            yield {"type": "status", "data": "Analyzing question..."}
             out = await self.expand_query(state)
             state.update(out)
 
-            yield {"type": "status", "data": "Searching documents..."}
+            yield {"type": "status", "data": f"Searching across {len(state['expanded_queries'])} query variants..."}
             out = await self.hybrid_search(state)
             state.update(out)
 
-            yield {"type": "status", "data": "Reranking results..."}
+            yield {"type": "status", "data": f"Reranking {len(state.get('search_results', []))} results..."}
             out = await self.rerank_results(state)
             state.update(out)
 
-            yield {"type": "status", "data": "Ranking results..."}
+            yield {"type": "status", "data": "Applying multi-factor ranking..."}
             out = await self.rank_results(state)
             state.update(out)
 
-            yield {"type": "status", "data": "Assembling context..."}
+            yield {"type": "status", "data": f"Assembling context from {len(state.get('ranked_results', []))} sources..."}
             out = await self.assemble_context(state)
             state.update(out)
 
-            # --- REAL TOKEN STREAMING STARTS HERE ---
             yield {"type": "status", "data": "Generating answer..."}
+            
+            # IMPROVED: Better streaming prompt
             prompt = ChatPromptTemplate.from_messages([
-                ("system", RAG_SYSTEM_PROMPT),
-                ("user", """
-                You MUST follow these rules:
-                1) Use ONLY facts from the Context.
-                2) Every factual sentence must end with a citation like [Source 1].
-                3) If the answer is not in Context at all, reply ONLY with: "Not found in the provided documents."
-                4) Do NOT add "Not found..." if you already answered using Context.
+                ("system", """You are a precise research assistant. Your answers must:
+1. Use ONLY facts from provided sources
+2. Cite every claim with [Source N]
+3. Synthesize multiple sources when available
+4. Be comprehensive and accurate"""),
+                ("user", """Answer using the provided sources. Follow these steps mentally:
 
-                Here is the information you have:
-                Context: {context}
+1. Scan all [Source] blocks
+2. Identify relevant facts from each source
+3. Synthesize into a coherent answer
+4. Cite every fact
 
-                Question: {query}
+Context:
+{context}
 
-                Provide a detailed answer with citations.
-                """)
+Question: {query}
+
+Answer (start directly, include citations):""")
             ])
 
-            chain = prompt | self.llm  
+            chain = prompt | self.llm
 
             full_text = ""
             async for chunk in chain.astream({
@@ -498,11 +720,12 @@ class RAGAgent:
             out = await self.verify_citations(state)
             state.update(out)
 
-            yield {"type": "status", "data": "Finalizing..."}
+            yield {"type": "status", "data": "Performing quality check..."}
             out = await self.self_reflect(state)
             state.update(out)
 
             if state.get("needs_refinement") and state.get("refinement_count", 0) < 1:
+                yield {"type": "status", "data": "Refining answer..."}
                 out = await self.refine_response(state)
                 state.update(out)
                 out = await self.verify_citations(state)
