@@ -1,5 +1,5 @@
 """
-Configuration management for the RAG system
+Configuration management - OPTIMIZED VERSION
 """
 import os
 from typing import Optional
@@ -78,38 +78,38 @@ class Settings(BaseSettings):
         description="Force CPU-only mode"
     )
     
-    # Search Configuration
+    # Search Configuration 
     HYBRID_SEARCH_SEMANTIC_WEIGHT: float = Field(
-        default=0.6,
+        default=0.65, 
         description="Weight for semantic search in hybrid mode"
     )
     HYBRID_SEARCH_BM25_WEIGHT: float = Field(
-        default=0.4,
+        default=0.35, 
         description="Weight for BM25 search in hybrid mode"
     )
     MAX_SEARCH_RESULTS: int = Field(
-        default=20,
+        default=25, 
         description="Maximum number of search results to retrieve"
     )
     
-    # Ranking Configuration
-    BASE_RELEVANCE_WEIGHT: float = 0.70
-    CITATION_FREQ_WEIGHT: float = 0.05
-    RECENCY_WEIGHT: float = 0.05
-    SPECIFICITY_WEIGHT: float = 0.10
-    SOURCE_QUALITY_WEIGHT: float = 0.10
+    # Ranking Configuration 
+    BASE_RELEVANCE_WEIGHT: float = 0.85
+    CITATION_FREQ_WEIGHT: float = 0.03 
+    RECENCY_WEIGHT: float = 0.02
+    SPECIFICITY_WEIGHT: float = 0.05  
+    SOURCE_QUALITY_WEIGHT: float = 0.05
     
-    # Context Assembly
+    # Context Assembly 
     DEFAULT_TOKEN_BUDGET: int = Field(
-        default=30000,
+        default=8000,  
         description="Token budget for context assembly"
     )
     PRIMARY_SOURCES_RATIO: float = Field(
-        default=0.75,
+        default=0.70,  
         description="Ratio of tokens for primary sources"
     )
     SUPPORTING_CONTEXT_RATIO: float = Field(
-        default=0.20,
+        default=0.25, 
         description="Ratio of tokens for supporting context"
     )
     METADATA_RATIO: float = Field(
