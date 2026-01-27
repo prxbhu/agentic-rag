@@ -65,3 +65,18 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(107, 114, 128, 0.8); /* gray-500 */
 }
+
+@keyframes slide-in {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}

@@ -12,10 +12,18 @@ export default function Resources() {
   const [resources, setResources] = useState<UploadedResource[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingList, setLoadingList] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-dismiss toast after 3 seconds
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   // Fetch resources when workspace changes
   useEffect(() => {
@@ -67,6 +75,16 @@ export default function Resources() {
 
       const file = files[0];
       const response = await resourceApi.upload(file, currentWorkspace.id);
+      const data = response.data as UploadResponse;
+
+      if (data.status === 'duplicate') {
+        setToast(data.message || 'File already exists');
+
+      if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
 
       const newResource: UploadedResource = {
         id: response.data.resource_id,
@@ -167,9 +185,17 @@ export default function Resources() {
         return 'Pending';
     }
   };
-
+  
   return (
     <div className="p-8 h-full flex flex-col">
+      {toast && (
+        <div className="fixed top-6 right-6 z-50">
+          <div className="flex items-center gap-2 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg">
+            <AlertCircle size={18} className="text-yellow-400" />
+            <span className="text-sm">{toast}</span>
+          </div>
+        </div>
+      )}
       <div className="max-w-6xl mx-auto w-full flex flex-col h-full">
         {/* Header */}
         <div className="mb-8 flex-shrink-0">

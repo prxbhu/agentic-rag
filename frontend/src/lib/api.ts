@@ -55,9 +55,10 @@ export interface Citation {
 
 export interface UploadResponse {
   resource_id: string;
-  task_id: string;
+  task_id?: string;
   filename: string;
   status: string;
+  message?: string;
 }
 
 export interface EmbeddingStatus {
