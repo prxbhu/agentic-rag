@@ -4,6 +4,9 @@ LLM service abstraction for multiple providers
 import logging
 from typing import Optional, AsyncGenerator
 from abc import ABC, abstractmethod
+import os
+from fastapi import HTTPException
+import httpx
 
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -188,6 +191,96 @@ class GeminiLLMService(BaseLLMService):
             logger.error(f"Gemini streaming failed: {e}")
             raise
 
+class vllmGemmaService(BaseLLMService):
+    """vLLM Gemma LLM service implementation"""
+    
+    def __init__(self):
+        logger.info("Initializing vLLM Gemma")
+        self.base_url = os.environ.get("VLLM_BASE_URL") 
+        if not self.base_url:
+            raise RuntimeError("VLLM_BASE_URL is not configured")
+        self.model = "gemma-3-4b-it"
+        self.client = httpx.AsyncClient(
+            timeout=300.0,
+            headers={"Content-Type": "application/json"}
+        )
+
+        logger.info("Initialized vLLM Gemma service")
+        
+    def _convert_messages(self, messages: list[BaseMessage]) -> list[dict]:
+        """Convert LangChain messages to OpenAI format"""
+        formatted = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                role = "user"
+            elif isinstance(msg, AIMessage):
+                role = "assistant"
+            elif isinstance(msg, SystemMessage):
+                role = "system"
+            else:
+                continue
+
+            formatted.append({"role": role, "content": msg.content})
+
+        return formatted
+    
+    async def generate(
+        self,
+        messages: list[BaseMessage],
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """
+        Generate a response from vLLM Gemma
+        """
+        try:
+            payload = {
+                "model": self.model,
+                "messages": self._convert_messages(messages),
+                "temperature": temperature,
+                "max_tokens": max_tokens or 1024,
+            }
+            response = await self.client.post("/v1/chat/completions",json=payload,)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        
+        except Exception as e:
+            logger.error(f"vLLM Gemma generation failed: {e}")
+            raise HTTPException(status_code=500, detail="LLM generation failed")
+    
+    async def stream(
+        self,
+        messages: list[BaseMessage],
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream a response from vLLM Gemma
+        """
+        payload = {
+            "model": self.model,
+            "messages": self._convert_messages(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens or 1024,
+            "stream": True,
+        }
+        try:
+            async with self.client.stream("POST", "/v1/chat/completions", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line.replace("data:", "").strip()
+                    if data == "[DONE]":
+                        break
+                    chunk = httpx.Response(status_code=200, content=data).json()
+                    delta = chunk["choices"][0]["delta"]
+                    if "content" in delta:
+                        yield delta["content"]
+        except Exception as e:
+            logger.error(f"vLLM Gemma streaming failed: {e}")
+            raise HTTPException(status_code=500, detail="LLM streaming failed")
 
 class LLMServiceFactory:
     """Factory for creating LLM service instances"""
@@ -211,6 +304,8 @@ class LLMServiceFactory:
         if provider is None:
             if settings.GEMINI_API_KEY:
                 provider = "gemini"
+            elif os.environ.get("VLLM_BASE_URL"):
+                provider = "vllm"
             else:
                 provider = "ollama"
         
@@ -223,6 +318,8 @@ class LLMServiceFactory:
             return GeminiLLMService(api_key)
         elif provider == "ollama":
             return OllamaLLMService()
+        elif provider == "vllm":
+            return vllmGemmaService()
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 
