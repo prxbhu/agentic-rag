@@ -19,6 +19,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 from langchain_core.messages import HumanMessage
+from FlagEmbedding import FlagReranker
 
 from app.config import settings
 from app.services.embedding import embedding_service
@@ -108,10 +109,10 @@ class AdvancedRerankingService:
     async def _cross_encoder_rerank(self, query: str, documents: List[Dict[str, Any]], top_k: int):
         """Uses a high-precision Cross-Encoder model"""
         try:
-            model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
+            model = FlagReranker('BAAI/bge-reranker-v2-m3', use_fp16=True)
             
             pairs = [[query, doc["content"]] for doc in documents]
-            scores = model.predict(pairs)
+            scores = model.compute_score(pairs)
             
             for doc, score in zip(documents, scores):
                 doc["rerank_score"] = float(score)
