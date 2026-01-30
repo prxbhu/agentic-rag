@@ -7,20 +7,22 @@ from uuid import UUID
 import operator
 
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_ollama import ChatOllama
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import StrOutputParser
 
 from app.config import settings
-from app.services.hardware import HardwareDetector
 from app.agents.prompts import RAG_SYSTEM_PROMPT, QUERY_EXPANSION_PROMPT
-from app.services.enhanced_rag import AdvancedRerankingService, QueryDecompositionAgent, ValidationService, retry_with_backoff, CircuitBreaker
+from app.services.enhanced_rag import AdvancedRerankingService, QueryDecompositionAgent, ValidationService, retry_with_backoff
+from app.services.llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
-
+class LLMResponse:
+    """Ensures response.content exists for downstream logic"""
+    def __init__(self, content: str):
+        self.content = content
+        
 class RAGState(TypedDict):
     """State for the RAG agent"""
     # Input
@@ -64,38 +66,14 @@ class RAGAgent:
         self.validation_service = ValidationService()
         
         # Initialize LLM
-        self.llm = self._initialize_llm()
+        self.llm = get_llm_service()
         
         # Initialize query decomposition
         self.query_decomposer = QueryDecompositionAgent(self.llm)
         
         # Build the graph
         self.graph = self._build_graph()
-    
-    def _initialize_llm(self):
-        """Initialize LLM based on hardware and configuration"""
-        # Check if Gemini API key is available
-        if settings.GEMINI_API_KEY:
-            logger.info("Using Google Gemini")
-            return ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",
-                google_api_key=settings.GEMINI_API_KEY,
-                temperature=0.3
-            )
-        
-        optimal_model = HardwareDetector.get_optimal_model()
-        ollama_options = HardwareDetector.get_ollama_options()
-        
-        logger.info(f"Using Ollama model: {optimal_model}")
-        
-        return ChatOllama(
-            model=optimal_model,
-            base_url=settings.OLLAMA_BASE_URL,
-            temperature=ollama_options["temperature"],
-            top_p=ollama_options["top_p"],
-            num_predict=ollama_options["num_predict"]
-        )
-    
+          
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow"""
         workflow = StateGraph(RAGState)
@@ -451,31 +429,35 @@ class RAGAgent:
         # Small LLMs work better with shorter, more direct instructions
         prompt = ChatPromptTemplate.from_messages([
             ("system", """You answer questions using only the provided sources. 
-    You must add [Source N] after every fact.
-    If the answer is not in the sources, say "Not found in documents."
-    """),
+            You must add [Source N] after every fact.
+            If the answer is not in the sources, say "Not found in documents."
+            """),
             ("user", """Sources:
-    {context}
+            {context}
 
-    Question: {query}
+            Question: {query}
 
-    Instructions:
-    1. Read all sources
-    2. Write the answer
-    3. Add [Source N] after each fact
-    4. Use facts from multiple sources if available
+            Instructions:
+            1. Read all sources
+            2. Write the answer
+            3. Add [Source N] after each fact
+            4. Use facts from multiple sources if available
 
-    Answer:""")
+            Answer:""")
         ])
         
-        chain = prompt | self.llm
+        messages = [
+            SystemMessage(content=prompt.messages[0].prompt.template),
+            HumanMessage(
+                content=prompt.messages[1].prompt.template.format(
+                    context=state["context"], query=state["query"]
+                )
+            ),
+        ]
         
         try:
-            response = await chain.ainvoke({
-                "context": state["context"],
-                "query": state["query"]
-            })
-            
+            text = await self.llm.generate(messages)
+            response = LLMResponse(text)
             response_text = response.content
             
             # If LLM forgot citations, try to add them
@@ -562,24 +544,28 @@ class RAGAgent:
         prompt = ChatPromptTemplate.from_messages([
             ("system", "Fix this answer to include proper citations."),
             ("user", """Sources:
-    {context}
+            {context}
 
-    Current Answer:
-    {answer}
+            Current Answer:
+            {response}
 
-    Task: Add [Source N] citations to every fact. Remove any unsupported claims.
+            Task: Add [Source N] citations to every fact. Remove any unsupported claims.
 
-    Fixed Answer:""")
+            Fixed Answer:""")
         ])
         
-        chain = prompt | self.llm
+        messages = [
+            SystemMessage(content=prompt.messages[0].prompt.template),
+            HumanMessage(
+                content=prompt.messages[1].prompt.template.format(
+                    context=state["context"], response=state["response"]
+                )
+            ),
+        ]
         
         try:
-            resp = await chain.ainvoke({
-                "context": state["context"],
-                "answer": state["response"]
-            })
-            
+            text = await self.llm.generate(messages)
+            resp = LLMResponse(text)
             refined = resp.content
             
             # If refinement made it worse (removed content), keep original
@@ -683,36 +669,39 @@ class RAGAgent:
             # IMPROVED: Better streaming prompt
             prompt = ChatPromptTemplate.from_messages([
                 ("system", """You are a precise research assistant. Your answers must:
-1. Use ONLY facts from provided sources
-2. Cite every claim with [Source N]
-3. Synthesize multiple sources when available
-4. Be comprehensive and accurate"""),
-                ("user", """Answer using the provided sources. Follow these steps mentally:
+                1. Use ONLY facts from provided sources
+                2. Cite every claim with [Source N]
+                3. Synthesize multiple sources when available
+                4. Be comprehensive and accurate"""),
+                                ("user", """Answer using the provided sources. Follow these steps mentally:
 
-1. Scan all [Source] blocks
-2. Identify relevant facts from each source
-3. Synthesize into a coherent answer
-4. Cite every fact
+                1. Scan all [Source] blocks
+                2. Identify relevant facts from each source
+                3. Synthesize into a coherent answer
+                4. Cite every fact
 
-Context:
-{context}
+                Context:
+                {context}
 
-Question: {query}
+                Question: {query}
 
-Answer (start directly, include citations):""")
+                Answer (start directly, include citations):""")
             ])
 
-            chain = prompt | self.llm
-
+            messages = [
+                SystemMessage(content=prompt.messages[0].prompt.template),
+                HumanMessage(
+                    content=prompt.messages[1].prompt.template.format(
+                        context=state["context"], query=state["query"]
+                    )
+                ),
+            ]
+            
             full_text = ""
-            async for chunk in chain.astream({
-                "context": state["context"],
-                "query": state["query"]
-            }):
-                token = getattr(chunk, "content", "") or ""
-                if token:
-                    full_text += token
-                    yield {"type": "content", "data": token}
+            
+            async for token in self.llm.stream(messages):
+                full_text += token
+                yield {"type": "content", "data": token}
 
             state["response"] = full_text
 

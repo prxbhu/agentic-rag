@@ -7,16 +7,26 @@ from abc import ABC, abstractmethod
 import os
 from fastapi import HTTPException
 import httpx
+from pathlib import Path
 
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_google_vertexai import ChatVertexAI
 
 from app.config import settings
-from app.services.hardware import HardwareDetector
+from dotenv import load_dotenv
+from google.oauth2 import service_account
+
+load_dotenv()
+
 
 logger = logging.getLogger(__name__)
 
+class LLMResponse:
+    """Ensures response.content exists for downstream logic"""
+    def __init__(self, content: str):
+        self.content = content
 
 class BaseLLMService(ABC):
     """Abstract base class for LLM services"""
@@ -41,96 +51,23 @@ class BaseLLMService(ABC):
         """Stream a response"""
         pass
 
-
-class OllamaLLMService(BaseLLMService):
-    """Ollama LLM service implementation"""
-    
-    def __init__(self):
-        # Get hardware-optimized model
-        self.model_name = HardwareDetector.get_optimal_model()
-        self.ollama_options = HardwareDetector.get_ollama_options()
-        
-        logger.info(f"Initializing Ollama with model: {self.model_name}")
-        
-        self.llm = ChatOllama(
-            model=self.model_name,
-            base_url=settings.OLLAMA_BASE_URL,
-            temperature=self.ollama_options["temperature"],
-            top_p=self.ollama_options["top_p"],
-            num_predict=self.ollama_options["num_predict"]
-        )
-    
-    async def generate(
-        self,
-        messages: list[BaseMessage],
-        temperature: float = 0.3,
-        max_tokens: Optional[int] = None
-    ) -> str:
-        """
-        Generate a response from Ollama
-        
-        Args:
-            messages: List of chat messages
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-            
-        Returns:
-            Generated response text
-        """
-        try:
-            # Update temperature if different
-            if temperature != self.ollama_options["temperature"]:
-                self.llm.temperature = temperature
-            
-            # Generate response
-            response = await self.llm.ainvoke(messages)
-            
-            return response.content
-        except Exception as e:
-            logger.error(f"Ollama generation failed: {e}")
-            raise
-    
-    async def stream(
-        self,
-        messages: list[BaseMessage],
-        temperature: float = 0.3,
-        max_tokens: Optional[int] = None
-    ) -> AsyncGenerator[str, None]:
-        """
-        Stream a response from Ollama
-        
-        Args:
-            messages: List of chat messages
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens to generate
-            
-        Yields:
-            Response chunks
-        """
-        try:
-            # Update temperature if different
-            if temperature != self.ollama_options["temperature"]:
-                self.llm.temperature = temperature
-            
-            # Stream response
-            async for chunk in self.llm.astream(messages):
-                if hasattr(chunk, 'content'):
-                    yield chunk.content
-        except Exception as e:
-            logger.error(f"Ollama streaming failed: {e}")
-            raise
-
+PROJECT_ROOT = Path(__file__).resolve().parents[2]  
+credentials_path = PROJECT_ROOT / "vertex.json"
+credentials = service_account.Credentials.from_service_account_file(str(credentials_path), scopes=["https://www.googleapis.com/auth/cloud-platform"])
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(credentials_path)
 
 class GeminiLLMService(BaseLLMService):
     """Google Gemini LLM service implementation"""
     
-    def __init__(self, api_key: str):
+    def __init__(self):
         logger.info("Initializing Google Gemini")
         
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            google_api_key=api_key,
-            temperature=0.3
+        self.llm = ChatVertexAI(
+            model="gemini-2.5-pro",
+            credentials=credentials,
+            temperature=0.0,
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
+            location=os.environ.get("GOOGLE_CLOUD_LOCATION")
         )
     
     async def generate(
@@ -201,6 +138,7 @@ class vllmGemmaService(BaseLLMService):
             raise RuntimeError("VLLM_BASE_URL is not configured")
         self.model = "gemma-3-4b-it"
         self.client = httpx.AsyncClient(
+            base_url=self.base_url,
             timeout=300.0,
             headers={"Content-Type": "application/json"}
         )
@@ -288,7 +226,6 @@ class LLMServiceFactory:
     @staticmethod
     def create_llm_service(
         provider: Optional[str] = None,
-        api_key: Optional[str] = None
     ) -> BaseLLMService:
         """
         Create an LLM service instance
@@ -300,24 +237,17 @@ class LLMServiceFactory:
         Returns:
             LLM service instance
         """
+        logger.info(f"Auto-detect: GEMINI={bool(credentials_path.exists())}, VLLM={bool(os.environ.get('VLLM_BASE_URL'))}")
         # Auto-detect provider
         if provider is None:
-            if settings.GEMINI_API_KEY:
+            if credentials_path.exists():
                 provider = "gemini"
             elif os.environ.get("VLLM_BASE_URL"):
                 provider = "vllm"
-            else:
-                provider = "ollama"
-        
         logger.info(f"Creating LLM service: {provider}")
         
         if provider == "gemini":
-            api_key = api_key or settings.GEMINI_API_KEY
-            if not api_key:
-                raise ValueError("Gemini API key is required")
-            return GeminiLLMService(api_key)
-        elif provider == "ollama":
-            return OllamaLLMService()
+            return GeminiLLMService()
         elif provider == "vllm":
             return vllmGemmaService()
         else:

@@ -63,10 +63,6 @@ class Settings(BaseSettings):
         default="gemma3:4b",
         description="Default chat model"
     )
-    GEMINI_API_KEY: Optional[str] = Field(
-        default=None,
-        description="Google Gemini API key (optional)"
-    )
     
     # Hardware Configuration
     ENABLE_GPU: str = Field(

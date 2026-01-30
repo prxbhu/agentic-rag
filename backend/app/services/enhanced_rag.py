@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 from FlagEmbedding import FlagReranker
 
 from app.config import settings
@@ -30,41 +31,11 @@ logger = logging.getLogger(__name__)
 W_RELEVANCE = 0.7  
 W_DIVERSITY = 0.3 
 
-class CircuitBreaker:
-    """Circuit breaker to prevent cascading failures"""
-    
-    def __init__(self, failure_threshold: int = 5, timeout: int = 60):
-        self.failure_threshold = failure_threshold
-        self.timeout = timeout
-        self.failures = 0
-        self.last_failure_time = None
-        self.state = "closed"
-    
-    def call(self, func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            if self.state == "open":
-                if datetime.now() - self.last_failure_time > timedelta(seconds=self.timeout):
-                    self.state = "half_open"
-                    logger.info(f"Circuit breaker half-open for {func.__name__}")
-                else:
-                    raise Exception(f"Circuit breaker open for {func.__name__}")
-            
-            try:
-                result = await func(*args, **kwargs)
-                if self.state == "half_open":
-                    self.state = "closed"
-                    self.failures = 0
-                return result
-            except Exception as e:
-                self.failures += 1
-                self.last_failure_time = datetime.now()
-                if self.failures >= self.failure_threshold:
-                    self.state = "open"
-                    logger.error(f"Circuit breaker opened for {func.__name__}")
-                raise e
-        return wrapper
-
+class LLMResponse:
+    """Ensures response.content exists for downstream logic"""
+    def __init__(self, content: str):
+        self.content = content
+        
 async def retry_with_backoff(func, max_retries=3, initial_delay=1.0, backoff_factor=2.0):
     delay = initial_delay
     for attempt in range(max_retries):
@@ -266,10 +237,10 @@ class QueryDecompositionAgent:
     async def decompose_query(self, query: str) -> List[str]:
         """
         Generate diverse sub-queries using different perspectives
-        """
-        prompt = f"""You are an expert at breaking down questions to improve information retrieval.
-
-                Generate 3 DIVERSE search queries to find information about this question. Each query should:
+        """        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert at breaking down questions to improve information retrieval."),
+            ("user", """Generate 3 DIVERSE search queries to find information about this question. Each query should:
                 - Use DIFFERENT keywords and phrasings
                 - Target a specific aspect (who, what, when, where, how much)
                 - Be concrete and specific
@@ -285,10 +256,19 @@ class QueryDecompositionAgent:
                 - Graduate Aptitude Test Engineering 2026 registration charges
                 - GATE exam fee structure payment details
 
-                Your queries:"""
+                Your queries:""")
+        ])
+                    
+        messages = [
+            SystemMessage(content=prompt.messages[0].prompt.template),
+            HumanMessage(
+                content=prompt.messages[1].prompt.template.format(query=query)
+            ),
+        ]
         
         try:
-            response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+            text = await self.llm.generate(messages)
+            response = LLMResponse(text)
             lines = response.content.strip().split('\n')
             
             # Clean up the response
@@ -324,13 +304,12 @@ class QueryDecompositionAgent:
         has_citations = '[Source' in answer or 'Source 1' in answer
         source_count = len(sources)
         
-        prompt = f"""Evaluate this RAG answer on a scale of 0-10.
-
-                Question: {query}
-                Answer: {answer}
-                Number of sources available: {source_count}
-
-                Scoring Rubric:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert evaluator of AI-generated answers based on retrieved documents."),
+            ("user", """Question: {query}
+                        Answer: {answer}
+                        Number of sources available: {source_count}    
+            Scoring Rubric:
                 1. Direct Answer (3 points): Does it directly answer the question?
                 2. Source Support (3 points): Is every claim backed by sources?
                 3. Completeness (2 points): Is the answer thorough?
@@ -345,10 +324,19 @@ class QueryDecompositionAgent:
                 SCORE: [0-10]
                 REASONING: [Why this score?]
                 MISSING: [What's missing if score < 8]
-                """
+                """)
+        ])
         
+        messages = [
+            SystemMessage(content=prompt.messages[0].prompt.template),
+            HumanMessage(
+                content=prompt.messages[1].prompt.template.format(
+                query=query, answer=answer, source_count=source_count)
+                ),
+        ]
         try:
-            response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+            text = await self.llm.generate(messages)
+            response = LLMResponse(text)
             content = response.content
             
             # Parse score
