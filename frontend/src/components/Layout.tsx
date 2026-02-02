@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { MessageSquare, FileText, Activity, LayoutDashboard, Moon, Sun, MessageCircle, ChevronDown } from 'lucide-react';
+import { MessageSquare, FileText, Activity, Moon, Sun, MessageCircle, ChevronDown } from 'lucide-react';
 import { conversationApi, Conversation } from '@/lib/api';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
@@ -75,7 +75,6 @@ export default function Layout() {
   };
 
   const navItems = [
-    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/chat', icon: MessageSquare, label: 'New Chat' },
     { to: '/resources', icon: FileText, label: 'Resources' },
     { to: '/health', icon: Activity, label: 'Health' },
