@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useWorkspace } from '../context/WorkspaceContext';
-import { ChevronDown, Plus, Check } from 'lucide-react';
+import { ChevronDown, Plus, Check, Search } from 'lucide-react';
 
 export default function WorkspaceSwitcher() {
     const { workspaces, currentWorkspace, setCurrentWorkspace, createWorkspace, loading } = useWorkspace();
     const [isOpen, setIsOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [newWorkspaceName, setNewWorkspaceName] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -17,6 +18,10 @@ export default function WorkspaceSwitcher() {
         setIsCreating(false);
         setIsOpen(false);
     };
+
+    const filteredWorkspaces = workspaces.filter(ws => 
+        ws.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     if (loading || !currentWorkspace) {
         return <div className="text-sm text-gray-400">Loading...</div>;
@@ -42,19 +47,36 @@ export default function WorkspaceSwitcher() {
                         onClick={() => {
                             setIsOpen(false);
                             setIsCreating(false);
+                            setSearchQuery('');
                         }}
                     />
                     <div className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-20 overflow-hidden">
+                        
+                        <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center px-2 bg-gray-100 dark:bg-gray-700 rounded-md">
+                                <Search size={14} className="text-gray-400 mr-2" />
+                                <input 
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Search workspaces..."
+                                    className="w-full bg-transparent border-none text-sm px-0 py-1 focus:ring-0 text-gray-900 dark:text-white focus:outline-none"
+                                    autoFocus
+                                />
+                            </div>
+                        </div>
+
                         <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
                             <div className="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                 Workspaces
                             </div>
-                            {workspaces.map((ws) => (
+                            {filteredWorkspaces.map((ws) => (
                                 <button
                                     key={ws.id}
                                     onClick={() => {
                                         setCurrentWorkspace(ws);
                                         setIsOpen(false);
+                                        setSearchQuery('');
                                     }}
                                     className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-md transition-colors ${ws.id === currentWorkspace.id
                                             ? 'bg-primary-50 dark:bg-primary-900/50 text-primary-700 dark:text-primary-400'
@@ -65,6 +87,11 @@ export default function WorkspaceSwitcher() {
                                     {ws.id === currentWorkspace.id && <Check size={14} />}
                                 </button>
                             ))}
+                            {filteredWorkspaces.length === 0 && (
+                                <div className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 text-center">
+                                    No workspaces found
+                                </div>
+                            )}
                         </div>
 
                         <div className="border-t border-gray-200 dark:border-gray-700 p-2">
