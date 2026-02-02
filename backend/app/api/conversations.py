@@ -21,6 +21,7 @@ from app.services.ranking import RankingService
 from app.services.citation import CitationService
 from app.services.hardware import HardwareDetector
 from app.services.llm_service import get_llm_service
+from app.models.schemas import ConversationCreate
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class CreateConversationRequest(BaseModel):
     workspace_id: str
     title: Optional[str] = None
     system_prompt: Optional[str] = None
+    model_provider: Optional[str] = "gemini"
 
 
 class SendMessageRequest(BaseModel):
@@ -100,7 +102,7 @@ async def create_conversation(
                 "id": str(conversation_id),
                 "workspace_id": request.workspace_id,
                 "title": request.title or "New Conversation",
-                "model_name": model_name,
+                "model_name": request.model_provider,
                 "system_prompt": request.system_prompt
             }
         )
@@ -262,7 +264,7 @@ async def send_message(
         try:
             # Verify conversation exists
             conv_result = await db.execute(
-                text("SELECT id, title FROM conversations WHERE id = :id"),
+                text("SELECT id, title, model_name FROM conversations WHERE id = :id"),
                 {"id": str(conversation_id)}
             )
             conv = conv_result.fetchone()
@@ -286,10 +288,11 @@ async def send_message(
             await db.commit()
 
             # Initialize services + agent
+            model_provider = conv.model_name or "gemini"
             search_service = SearchService(db)
             ranking_service = RankingService(db)
             citation_service = CitationService(db)
-            rag_agent = RAGAgent(search_service, ranking_service, citation_service)
+            rag_agent = RAGAgent(search_service, ranking_service, citation_service, llm_provider=model_provider)
 
             # Stream tokens from LLM
             assistant_text = ""

@@ -14,7 +14,7 @@ from langchain_core.output_parsers import StrOutputParser
 from app.config import settings
 from app.agents.prompts import RAG_SYSTEM_PROMPT, QUERY_EXPANSION_PROMPT
 from app.services.enhanced_rag import AdvancedRerankingService, QueryDecompositionAgent, ValidationService, retry_with_backoff
-from app.services.llm_service import get_llm_service
+from app.services.llm_service import LLMServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class RAGState(TypedDict):
 class RAGAgent:
     """LangGraph-based RAG agent"""
     
-    def __init__(self, search_service, ranking_service, citation_service):
+    def __init__(self, search_service, ranking_service, citation_service, llm_provider):
         self.search_service = search_service
         self.ranking_service = ranking_service
         self.citation_service = citation_service
@@ -66,7 +66,7 @@ class RAGAgent:
         self.validation_service = ValidationService()
         
         # Initialize LLM
-        self.llm = get_llm_service()
+        self.llm = LLMServiceFactory.create_llm_service(llm_provider)
         
         # Initialize query decomposition
         self.query_decomposer = QueryDecompositionAgent(self.llm)

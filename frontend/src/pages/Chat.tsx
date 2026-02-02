@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Send, Loader2, FileText, Plus } from 'lucide-react';
+import { Send, Loader2, FileText, Plus, Settings} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { conversationApi, Message, Citation } from '@/lib/api';
@@ -10,6 +10,7 @@ import { useWorkspace } from '@/context/WorkspaceContext';
 export default function Chat() {
   const { currentWorkspace } = useWorkspace();
   const { conversationId: urlConversationId } = useParams();
+  const [selectedProvider, setSelectedProvider] = useState('gemini');
   const [conversationId, setConversationId] = useState<string | null>(
     urlConversationId || null
   );
@@ -62,7 +63,9 @@ export default function Chat() {
     try {
       const response = await conversationApi.create(
         currentWorkspace.id,
-        'New Conversation'
+        'New Conversation',
+        undefined,
+        selectedProvider
       );
       setConversationId(response.data.id);
       setMessages([]);
@@ -87,7 +90,9 @@ export default function Chat() {
         setLoading(true);
         const response = await conversationApi.create(
             currentWorkspace.id,
-            'New Conversation'
+            'New Conversation',
+            undefined,
+            selectedProvider
         );
         const newId = response.data.id;
         setConversationId(newId);
@@ -224,7 +229,19 @@ export default function Chat() {
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-xl font-semibold text-gray-900 dark:text-white">Chat</h1>
-          {conversationId && (
+          {!conversationId ? (
+             <div className="flex items-center mt-1 space-x-2">
+                <span className="text-xs text-gray-500">Provider:</span>
+                <select 
+                    value={selectedProvider} 
+                    onChange={(e) => setSelectedProvider(e.target.value)}
+                    className="text-xs bg-gray-100 dark:bg-gray-700 border-none rounded px-2 py-1"
+                >
+                    <option value="gemini">Google Gemini</option>
+                    <option value="vllm">vLLM(private)</option>
+                </select>
+             </div>
+          ) : (
             <p className="text-sm text-gray-500 dark:text-gray-400">ID: {conversationId.slice(0, 8)}...</p>
           )}
         </div>

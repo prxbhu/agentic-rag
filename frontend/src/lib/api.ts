@@ -106,11 +106,12 @@ export const resourceApi = {
 
 // Conversation endpoints
 export const conversationApi = {
-  create: (workspaceId: string, title?: string, systemPrompt?: string) =>
+  create: (workspaceId: string, title?: string, systemPrompt?: string, modelProvider: string = 'gemini') =>
     api.post<Conversation>('/conversations', {
       workspace_id: workspaceId,
       title,
       system_prompt: systemPrompt,
+      model_provider: modelProvider,
     }),
   get: (conversationId: string) =>
     api.get<Conversation>(`/conversations/${conversationId}`),

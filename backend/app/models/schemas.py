@@ -100,6 +100,7 @@ class ConversationResponse(ConversationBase):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+    model_provider: Optional[str]
 
 class ConversationWithMessages(ConversationResponse):
     messages: List["MessageResponse"] = Field(default_factory=list)
