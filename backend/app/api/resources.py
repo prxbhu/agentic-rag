@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.config import settings
-from app.services.ingestion import IngestionService
+from app.services.ingestion import DoclingIngestionService
 from app.tasks.embedding_tasks import generate_embeddings_task
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ async def upload_document(
         # await db.commit()
         
         # Process document into chunks
-        ingestion_service = IngestionService()
+        ingestion_service = DoclingIngestionService()
         chunks = await ingestion_service.process_document(
             content=content,
             filename=file.filename,
