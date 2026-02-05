@@ -12,7 +12,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from app.config import settings
-from app.agents.prompts import RAG_SYSTEM_PROMPT, QUERY_EXPANSION_PROMPT
 from app.services.enhanced_rag import AdvancedRerankingService, QueryDecompositionAgent, ValidationService, retry_with_backoff
 from app.services.llm_service import LLMServiceFactory
 
