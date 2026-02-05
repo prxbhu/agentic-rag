@@ -1,27 +1,34 @@
 # Production-Ready Agentic RAG System
 
-A complete, production-grade Retrieval-Augmented Generation (RAG) system built with LangChain, LangGraph, and open-source models.
+A complete, production-grade Retrieval-Augmented Generation (RAG) system built with LangChain, LangGraph, and open-source models. This system features an autonomous agentic workflow capable of self-reflection, query decomposition, and answer refinement.
 
 ## 🚀 Features
 
 ### Core Capabilities
+- **Agentic Workflow**: Uses LangGraph for orchestrating complex reasoning loops (Decomposition → Search → Reflect → Refine).
+- **Advanced Ingestion**: Powered by **Docling** for high-fidelity parsing of PDFs (with OCR), Office docs (DOCX, XLSX, PPTX), images, and HTML.
 - **Async-First Architecture**: Celery workers handle embeddings; API responds immediately
-- **Hybrid Search**: Semantic + BM25 with reciprocal rank fusion
+- **Hybrid Search**: Semantic (pgvector) + BM25 (PostgreSQL FTS) with reciprocal rank fusion.
+- **Advanced Reranking**: Multi-stage reranking using Cross-Encoders (BGE-Reranker) and MMR for diversity.
 - **Multi-Factor Ranking**: Combines relevance, recency, specificity, citation frequency, and source quality
-- **Citation Verification**: Post-generation validation of LLM claims against sources
-- **Hardware Adaptation**: Auto-detects GPU/CPU, adjusts models and timeouts
+- **Citation Verification**: Post-generation validation to prevent hallucinations by verifying claims against source text.
+- **Self-Correction**: The agent evaluates its own answers and enters a refinement loop if quality standards aren't met.
+- **Hardware Adaptation**: Auto-detects NVIDIA/AMD GPUs or Apple Metal to optimize model loading.
 - **Content Deduplication**: SHA-256 hashing prevents re-processing identical documents
 
 ### Tech Stack
-- **Backend**: FastAPI + Python 3.11+
-- **Database**: PostgreSQL 16 + pgvector
+- **Backend**: FastAPI + Python 3.12+
+- **Database**: PostgreSQL 16 + pgvector (with async SQLAlchemy)
 - **Vector Search**: HNSW indexing for <200ms searches
 - **Task Queue**: Celery + Redis
-- **LLM**: Ollama (Mistral 7B 4-bit quantized) or Google Gemini
+- **LLM Support**: 
+  - **Ollama** (Local inference)
+  - **Google Vertex AI** (Gemini models)
+  - **vLLM** (High-throughput serving)
+- **Ingestion**: Docling (IBM) for layout-aware document parsing
 - **Embeddings**: sentence-transformers/all-mpnet-base-v2 (768-dim)
-- **Orchestration**: LangGraph for agentic workflows
-- **Frontend**: React 19 + TypeScript + Vite
-
+- **Orchestration**: LangGraph state machines
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind
 ## 📋 Prerequisites
 
 - Docker & Docker Compose
@@ -37,6 +44,12 @@ A complete, production-grade Retrieval-Augmented Generation (RAG) system built w
 git clone <your-repo-url>
 cd agentic-rag-system
 
+# Run the automated setup script
+chmod +x quick_setup.sh
+./quick_setup.sh
+
+cd backend
+
 # Create environment file
 cp .env.example .env
 
@@ -48,11 +61,22 @@ nano .env
 
 ```bash
 # .env
-POSTGRES_PASSWORD=your_secure_password
+# Database & Queue
+DATABASE_URL=postgresql://postgres:password@localhost:5432/rag_db
+REDIS_URL=redis://localhost:6379/0
 GEMINI_API_KEY=your_gemini_key_optional
 
+# LLM Selection
+OLLAMA_BASE_URL=http://localhost:11434
+# To use Google Vertex AI (Gemini):
+GOOGLE_APPLICATION_CREDENTIALS=./backend/vertex.json
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+# To use vLLM:
+VLLM_BASE_URL=http://your-vllm-instance:8000
+
 # Hardware settings
-ENABLE_GPU=auto  # auto, true, or false
+ENABLE_GPU=auto 
 FORCE_CPU=false  # Set to true to force CPU-only mode
 
 # Model configuration
@@ -60,7 +84,29 @@ EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
 CHAT_MODEL=mistral:7b-instruct-q4_0
 ```
 
-### 3. Launch Stack
+### 3. Environment Setup
+```bash
+cd backend
+uv venv
+uv pip install -r requirements.txt
+cd..
+cd frontend
+npm i
+```
+
+### 4. Launch Stack Locally
+
+```bash
+# Start backend services
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload         
+
+# Start frontend services
+cd frontend
+npm run dev
+```
+
+### 4. Launch Stack through Docker
 
 ```bash
 # Start all services
@@ -73,7 +119,7 @@ docker-compose logs -f ollama
 docker exec -it rag_ollama ollama pull mistral:7b-instruct-q4_0
 ```
 
-### 4. Verify Services
+### 5. Verify Services
 
 ```bash
 # Check all services are healthy
@@ -87,7 +133,7 @@ docker-compose logs -f backend
 docker-compose logs -f celery_worker
 ```
 
-### 5. Access Application
+### 6. Access Application
 
 - **Frontend**: http://localhost:3000
 - **API Docs**: http://localhost:8000/docs
@@ -105,19 +151,20 @@ agentic-rag-system/
 │   │   ├── api/                    # REST endpoints
 │   │   │   ├── resources.py        # Document upload
 │   │   │   ├── conversations.py    # Chat endpoints
+│   │   │   ├── workspaces.py    # Workspace endpoints
 │   │   │   └── health.py           # Health checks
 │   │   ├── services/               # Business logic
 │   │   │   ├── ingestion.py        # Document parsing
 │   │   │   ├── embedding.py        # Vector generation
+│   │   │   ├── enhanced_rag.py     # Reranking & Query Decomposition
 │   │   │   ├── search.py           # Hybrid search
-│   │   │   ├── ranking.py          # Multi-factor ranking
+│   │   │   ├── ranking.py          # Scoring logic
 │   │   │   ├── llm_service.py      # LLM abstraction
 │   │   │   ├── citation.py         # Citation verification
 │   │   │   └── hardware.py         # GPU/CPU detection
 │   │   ├── agents/                 # LangGraph agents
 │   │   │   ├── rag_agent.py        # Main RAG orchestration
-│   │   │   ├── tools.py            # LangChain tools
-│   │   │   └── prompts.py          # Prompt templates
+│   │   │   └── tools.py            # LangChain tools
 │   │   ├── models/                 # Data models
 │   │   │   ├── schemas.py          # Pydantic models
 │   │   │   └── database_models.py  # SQLAlchemy models
@@ -140,18 +187,27 @@ agentic-rag-system/
 ├── database/
 │   ├── init.sql                    # Schema + pgvector
 │   └── migrations/
+├── frontend/
 ├── docker-compose.yml              # 7-service stack
 └── README.md
 ```
 
 ## 🔧 API Usage
 
-### Upload Documents
+### Create Workspace
 
+```bash
+curl -X POST "http://localhost:8000/api/workspaces/" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Research Project", "workspace_type": "personal"}'
+```
+
+### Upload Documents
+Supports PDF, DOCX, XLSX, PPTX, Images, etc.
 ```bash
 curl -X POST "http://localhost:8000/api/resources/upload" \
   -H "Content-Type: multipart/form-data" \
-  -F "file=@document.pdf" \
+  -F "file=@paper.pdf" \
   -F "workspace_id=<workspace-uuid>"
 ```
 
@@ -161,13 +217,13 @@ curl -X POST "http://localhost:8000/api/resources/upload" \
 curl "http://localhost:8000/api/resources/<resource-id>/embedding-status"
 ```
 
-### Send Chat Message
+### Stream Chat Response
 
 ```bash
 curl -X POST "http://localhost:8000/api/conversations/<conv-id>/messages" \
   -H "Content-Type: application/json" \
   -d '{
-    "content": "What are the key findings?",
+    "content": "Analyze the revenue growth mentioned in the documents.",
     "workspace_id": "<workspace-uuid>"
   }'
 ```
@@ -180,55 +236,23 @@ curl -X POST "http://localhost:8000/api/conversations/<conv-id>/messages" \
    └─> Include synonyms and reformulations
 
 2. Hybrid Search
-   ├─> Semantic search (pgvector cosine similarity)
-   ├─> BM25 keyword search (PostgreSQL FTS)
-   └─> Reciprocal rank fusion merge
+   ├─> Hybrid Search (Vector + Keyword)
+   ├─> Advanced Reranking (Cross-Encoder / Hybrid Score)
+   └─> Diversity Check (MMR)
 
-3. Multi-Factor Ranking
-   ├─> Base relevance (40%)
-   ├─> Citation frequency (15%)
-   ├─> Recency (15%)
-   ├─> Specificity (15%)
-   └─> Source quality (15%)
+3. Context Assembly
+   ├─> Token Budgeting (allocate tokens for primary vs supporting sources)
+   └─> Metadata Injection (recency, source quality)
+4. LLM Generation
+   └─> LLM generates initial answer 
+   └─> Strict citation requirements
 
-4. Context Assembly
-   ├─> Token budget: 2000 default
-   ├─> Primary sources: 60%
-   ├─> Supporting context: 30%
-   └─> Metadata: 10%
-
-5. LLM Generation
-   ├─> Streaming response
-   ├─> Strict citation requirements
-   └─> Anti-hallucination prompts
-
-6. Citation Verification
-   ├─> Extract [Source N] references
-   ├─> Validate against source chunks
-   └─> Flag mismatches
+5. Verification & Reflection
+   ├─> Verify Citations: Check if [Source X] actually supports the claim
+   ├─> Self-Reflection: LLM grades its own answer (0-10 score)
+   │    └─> If Score < 6: Loop back to Refinement
+   └─> Refine Response: Fix missing citations or logic gaps
 ```
-
-## 🔍 Hardware Optimization
-
-### GPU Detection
-
-The system automatically detects and optimizes for:
-- **NVIDIA GPUs**: Uses CUDA acceleration
-- **AMD GPUs**: Uses ROCm support
-- **Apple Silicon**: Uses Metal acceleration
-- **CPU-only**: Adjusts batch sizes and timeouts
-
-### Model Selection
-
-| Hardware | Model |
-|----------|-------|
-| GPU + 16GB+ RAM | mistral:7b-instruct |
-| GPU + 8GB RAM | mistral:7b-instruct-q4_0 |
-| CPU + 16GB RAM | mistral:7b-instruct-q4_0 |
-| CPU + 8GB RAM | gemma:2b-instruct-q4_0 |
-| CPU + <8GB RAM | phi:2.7b-instruct-q4_0 |
-
-## 📊 Performance Tuning
 
 ### Database Optimization
 
@@ -250,7 +274,10 @@ SET hnsw.ef_search = 100;  -- Higher = better recall, slower search
 ```bash
 # Adjust concurrency based on CPU cores
 # In docker-compose.yml, celery_worker service:
-command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+celery -A app.tasks.celery_app worker \         
+  --loglevel=info \
+  --pool=solo \
+  -Q embeddings
 ```
 
 ### Embedding Batch Size
@@ -268,7 +295,7 @@ BATCH_SIZE = 16  # CPU mode
 ### Ollama Model Not Found
 
 ```bash
-docker exec -it rag_ollama ollama pull mistral:7b-instruct-q4_0
+docker exec -it rag_ollama ollama pull gemma3:4b
 ```
 
 ### Out of Memory
@@ -278,7 +305,7 @@ docker exec -it rag_ollama ollama pull mistral:7b-instruct-q4_0
 BATCH_SIZE=16
 
 # Use smaller model
-CHAT_MODEL=phi:2.7b-instruct-q4_0
+CHAT_MODEL=gemma3:1b
 
 # Force CPU mode
 FORCE_CPU=true
@@ -306,18 +333,6 @@ docker exec -it rag_redis redis-cli FLUSHDB
 
 ## 📈 Monitoring
 
-### Health Checks
-
-```bash
-# Overall system health
-curl http://localhost:8000/api/health
-
-# Database connection
-curl http://localhost:8000/api/health/db
-
-# Ollama status
-curl http://localhost:11434/api/tags
-```
 
 ### Logs
 
@@ -346,17 +361,13 @@ docker run -p 5555:5555 mher/flower:latest \
 2. **Use HTTPS** in production
 3. **Enable authentication** for API endpoints
 4. **Restrict CORS origins** in `config.py`
-5. **Scan uploaded files** for malware
 6. **Rate limit** API endpoints
 7. **Sanitize user inputs** to prevent injection attacks
 
 ## 📝 License
 
-MIT License - see LICENSE file for details
+MIT License - see LICENSE file for details.
 
-## 🤝 Contributing
-
-Contributions welcome! Please read CONTRIBUTING.md first.
 
 ## 📚 References
 
@@ -365,9 +376,4 @@ Contributions welcome! Please read CONTRIBUTING.md first.
 - [pgvector Documentation](https://github.com/pgvector/pgvector)
 - [Ollama Models](https://ollama.ai/library)
 - [Sentence Transformers](https://www.sbert.net/)
-
-## 💬 Support
-
-- Issues: GitHub Issues
-- Discussions: GitHub Discussions
-- Email: support@example.com
+- [Docling](https://docling-project.github.io/docling/)
