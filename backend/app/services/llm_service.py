@@ -18,6 +18,9 @@ from app.config import settings
 from dotenv import load_dotenv
 from google.oauth2 import service_account
 
+from app.services.hardware import HardwareDetector
+from langchain_ollama import ChatOllama
+
 load_dotenv()
 
 
@@ -220,6 +223,85 @@ class vllmGemmaService(BaseLLMService):
             logger.error(f"vLLM Gemma streaming failed: {e}")
             raise HTTPException(status_code=500, detail="LLM streaming failed")
 
+class OllamaLLMService(BaseLLMService):
+    """Ollama LLM service implementation"""
+    
+    def __init__(self):
+        # Get hardware-optimized model
+        self.model_name = HardwareDetector.get_optimal_model()
+        self.ollama_options = HardwareDetector.get_ollama_options()
+        
+        logger.info(f"Initializing Ollama with model: {self.model_name}")
+        
+        self.llm = ChatOllama(
+            model=self.model_name,
+            base_url=settings.OLLAMA_BASE_URL,
+            temperature=self.ollama_options["temperature"],
+            top_p=self.ollama_options["top_p"],
+            num_predict=self.ollama_options["num_predict"]
+        )
+    
+    async def generate(
+        self,
+        messages: list[BaseMessage],
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None
+    ) -> str:
+        """
+        Generate a response from Ollama
+        
+        Args:
+            messages: List of chat messages
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            
+        Returns:
+            Generated response text
+        """
+        try:
+            # Update temperature if different
+            if temperature != self.ollama_options["temperature"]:
+                self.llm.temperature = temperature
+            
+            # Generate response
+            response = await self.llm.ainvoke(messages)
+            
+            return response.content
+        except Exception as e:
+            logger.error(f"Ollama generation failed: {e}")
+            raise
+    
+    async def stream(
+        self,
+        messages: list[BaseMessage],
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream a response from Ollama
+        
+        Args:
+            messages: List of chat messages
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            
+        Yields:
+            Response chunks
+        """
+        try:
+            # Update temperature if different
+            if temperature != self.ollama_options["temperature"]:
+                self.llm.temperature = temperature
+            
+            # Stream response
+            async for chunk in self.llm.astream(messages):
+                if hasattr(chunk, 'content'):
+                    yield chunk.content
+        except Exception as e:
+            logger.error(f"Ollama streaming failed: {e}")
+            raise
+
+
 class LLMServiceFactory:
     """Factory for creating LLM service instances"""
     
@@ -250,6 +332,8 @@ class LLMServiceFactory:
             return GeminiLLMService()
         elif provider == "vllm":
             return vllmGemmaService()
+        elif provider == "ollama":
+            return OllamaLLMService()
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 

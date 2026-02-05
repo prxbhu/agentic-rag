@@ -239,6 +239,7 @@ export default function Chat() {
                 >
                     <option value="gemini">Google Gemini</option>
                     <option value="vllm">vLLM(private)</option>
+                    <option value="ollama">Ollama(private)</option>
                 </select>
              </div>
           ) : (
