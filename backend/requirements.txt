@@ -21,6 +21,7 @@ langchain-ollama
 langchain-google-genai
 langgraph
 langchain-cohere
+langchain_google_vertexai
 
 # Embeddings
 sentence-transformers==3.3.1
@@ -67,3 +68,6 @@ pytest-cov==6.0.0
 black==24.10.0
 flake8==7.1.1
 mypy==1.14.0
+
+# Docling
+docling==2.70.0
