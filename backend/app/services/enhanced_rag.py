@@ -70,7 +70,8 @@ class AdvancedRerankingService:
             if method == "cross_encoder":
                 return await self._cross_encoder_rerank(query, documents, top_k)
             elif method == "hybrid":
-                return await self._hybrid_rerank(query, documents, top_k)
+                hybrid_docs =  await self._hybrid_rerank(query, documents, top_k * 2)
+                return await self._cross_encoder_rerank(query, hybrid_docs, top_k)
             else:
                 return documents[:top_k]
         except Exception as e:
