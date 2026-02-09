@@ -38,7 +38,6 @@ class IngestionService:
     def __init__(self):
         # Initialize tiktoken for accurate token counting
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
-        self.fallback_service = IngestionService()
     
     async def process_document(
         self,
@@ -326,6 +325,7 @@ class DoclingIngestionService():
     def __init__(self):
         # Initialize tiktoken for accurate token counting
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        self.fallback_service = IngestionService()
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_ocr = True 
         pipeline_options.do_table_structure = False
