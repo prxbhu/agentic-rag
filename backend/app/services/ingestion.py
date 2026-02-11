@@ -203,7 +203,6 @@ class IngestionService:
             )
             
             # If parent is small enough, it might result in just 1 child identical to parent
-            # That's fine, we still index it as a "child" with "parent" info
             
             for child_text in child_texts:
                 chunks.append(self._create_chunk_dict(
