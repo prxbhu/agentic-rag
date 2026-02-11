@@ -50,6 +50,7 @@ class SearchService:
                     c.content,
                     c.resource_id,
                     c.chunk_metadata,
+                    c.parent_content,
                     r.filename,
                     1 - (c.embedding <=> CAST(:query_embedding AS vector)) as similarity
                 FROM chunks c
@@ -78,7 +79,8 @@ class SearchService:
                     "resource_id": row.resource_id,
                     "filename": row.filename,
                     "metadata": row.chunk_metadata,
-                    "semantic_score": float(row.similarity)
+                    "semantic_score": float(row.similarity),
+                    "parent_content": row.parent_content
                 })
             
             logger.info(f"Semantic search returned {len(results)} results")
@@ -112,6 +114,7 @@ class SearchService:
                     c.content,
                     c.resource_id,
                     c.chunk_metadata,
+                    c.parent_content,
                     r.filename,
                     ts_rank_cd(
                         to_tsvector('english', c.content),
@@ -144,7 +147,8 @@ class SearchService:
                     "resource_id": row.resource_id,
                     "filename": row.filename,
                     "metadata": row.chunk_metadata,
-                    "bm25_score": float(row.bm25_score)
+                    "bm25_score": float(row.bm25_score),
+                    "parent_content": row.parent_content
                 })
             
             logger.info(f"Keyword search returned {len(results)} results")
@@ -218,7 +222,7 @@ class SearchService:
             chunk_sql = text("""
                 SELECT
                     c.id as chunk_id, c.content, c.resource_id,
-                    c.chunk_metadata, c.citation_count, r.filename
+                    c.chunk_metadata, c.citation_count, r.filename, c.parent_content
                 FROM chunks c
                 JOIN resources r ON c.resource_id = r.id
                 WHERE c.workspace_id = :workspace_id
@@ -248,7 +252,8 @@ class SearchService:
                     "citation_count": chunk.citation_count,
                     "combined_score": float(row.combined_score),
                     "semantic_score": float(row.semantic_score),
-                    "bm25_score": float(row.bm25_score)
+                    "bm25_score": float(row.bm25_score),
+                    "parent_content": chunk.parent_content
                 })
             
             logger.info(f"Hybrid search returned {len(results)} results")
