@@ -34,19 +34,23 @@ class Settings(BaseSettings):
     
     # Embedding Model
     EMBEDDING_MODEL: str = Field(
-        default="sentence-transformers/all-mpnet-base-v2",
+        default="BAAI/bge-m3",
         description="HuggingFace embedding model"
     )
     EMBEDDING_DIMENSION: int = Field(
-        default=768,
+        default=1024,
         description="Embedding vector dimension"
     )
     DEFAULT_CHUNK_SIZE: int = Field(
-        default=512,
-        description="Default chunk size in tokens"
+        default=1024,
+        description="Default chunk size in tokens (Parent Chunk)"
+    )
+    CHILD_CHUNK_SIZE: int = Field(
+        default=256,
+        description="Child chunk size in tokens for indexing"
     )
     CHUNK_OVERLAP: int = Field(
-        default=50,
+        default=100,
         description="Overlap between chunks in tokens"
     )
     BATCH_SIZE: int = Field(
@@ -89,11 +93,11 @@ class Settings(BaseSettings):
     )
     
     # Ranking Configuration 
-    BASE_RELEVANCE_WEIGHT: float = 0.85
-    CITATION_FREQ_WEIGHT: float = 0.03 
-    RECENCY_WEIGHT: float = 0.02
-    SPECIFICITY_WEIGHT: float = 0.05  
-    SOURCE_QUALITY_WEIGHT: float = 0.05
+    BASE_RELEVANCE_WEIGHT: float = 0.90
+    CITATION_FREQ_WEIGHT: float = 0.025 
+    RECENCY_WEIGHT: float = 0.025
+    SPECIFICITY_WEIGHT: float = 0.025  
+    SOURCE_QUALITY_WEIGHT: float = 0.025
     
     # Context Assembly 
     DEFAULT_TOKEN_BUDGET: int = Field(
