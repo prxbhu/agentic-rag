@@ -2,6 +2,15 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- -- Drop existing tables for a clean reset (Development Mode)
+-- DROP TABLE IF EXISTS source_quality CASCADE;
+-- DROP TABLE IF EXISTS embedding_tasks CASCADE;
+-- DROP TABLE IF EXISTS messages CASCADE;
+-- DROP TABLE IF EXISTS conversations CASCADE;
+-- DROP TABLE IF EXISTS chunks CASCADE;
+-- DROP TABLE IF EXISTS resources CASCADE;
+-- DROP TABLE IF EXISTS workspaces CASCADE;
+
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -57,7 +66,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     resource_id UUID REFERENCES resources(id) ON DELETE CASCADE,
     workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(768), -- all-mpnet-base-v2 dimension
+    embedding vector(1024), -- BAAI/bge-m3 dimension
+    parent_content TEXT, -- Content of the parent chunk (larger context)
+    parent_chunk_id UUID, -- Link to parent (logical grouping)
     chunk_index INTEGER NOT NULL,
     token_count INTEGER NOT NULL,
     chunk_metadata JSONB DEFAULT '{}', -- stores section, page_num, etc.
@@ -173,7 +184,7 @@ ON CONFLICT DO NOTHING;
 
 -- Function for hybrid search (semantic + BM25)
 CREATE OR REPLACE FUNCTION hybrid_search(
-    query_embedding vector(768),
+    query_embedding vector(1024),
     query_text TEXT,
     workspace_filter UUID,
     result_limit INT DEFAULT 20,
