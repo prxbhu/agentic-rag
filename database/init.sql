@@ -2,15 +2,6 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- -- Drop existing tables for a clean reset (Development Mode)
--- DROP TABLE IF EXISTS source_quality CASCADE;
--- DROP TABLE IF EXISTS embedding_tasks CASCADE;
--- DROP TABLE IF EXISTS messages CASCADE;
--- DROP TABLE IF EXISTS conversations CASCADE;
--- DROP TABLE IF EXISTS chunks CASCADE;
--- DROP TABLE IF EXISTS resources CASCADE;
--- DROP TABLE IF EXISTS workspaces CASCADE;
-
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
