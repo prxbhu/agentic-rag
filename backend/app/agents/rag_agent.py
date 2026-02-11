@@ -328,7 +328,7 @@ class RAGAgent:
             if chunk_id in processed_ids:
                 continue
 
-            content = result.get("content") or ""
+            content = result.get("parent_content") or result.get("content") or ""
             preview = truncate_to_tokens(content, GUARANTEED_MAX_TOKENS)
             added = add_source(result, preview)
             
@@ -346,7 +346,7 @@ class RAGAgent:
             if chunk_id in processed_ids:
                 continue
 
-            content = result.get("content") or ""
+            content = result.get("parent_content") or result.get("content") or ""
             capped = truncate_to_tokens(content, MAX_TOKENS_PER_CHUNK)
 
             t = approx_tokens(capped)
@@ -369,7 +369,7 @@ class RAGAgent:
             if chunk_id in processed_ids:
                 continue
 
-            content = result.get("content") or ""
+            content = result.get("parent_content") or result.get("content") or ""
             capped = truncate_to_tokens(content, MAX_TOKENS_PER_CHUNK // 2)
 
             add_source(result, capped)
@@ -384,7 +384,7 @@ class RAGAgent:
                 if chunk_id in processed_ids:
                     continue
 
-                content = result.get("content") or ""
+                content = result.get("parent_content") or result.get("content") or ""
                 snippet = truncate_to_tokens(content, 150)
                 add_source(result, snippet)
 
