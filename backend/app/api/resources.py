@@ -138,12 +138,14 @@ async def upload_document(
             text("""
                 INSERT INTO chunks (
                     id, resource_id, workspace_id, content,
-                    chunk_index, token_count, chunk_metadata
+                    chunk_index, token_count, chunk_metadata,
+                    parent_content, parent_chunk_id
                 )
                 VALUES (
                     :id, :resource_id, :workspace_id, :content,
                     :chunk_index, :token_count,
-                    CAST(:metadata AS JSONB)
+                    CAST(:metadata AS JSONB),
+                    :parent_content, :parent_chunk_id
                 )
             """),
             {
@@ -153,7 +155,9 @@ async def upload_document(
                 "content": chunk["content"],
                 "chunk_index": chunk["chunk_index"],
                 "token_count": chunk["token_count"],
-                "metadata": json.dumps(chunk["metadata"]) 
+                "metadata": json.dumps(chunk["metadata"]),
+                "parent_content": chunk.get("parent_content"),
+                "parent_chunk_id": str(chunk.get("parent_chunk_id")) if chunk.get("parent_chunk_id") else None
             }
         )
 
