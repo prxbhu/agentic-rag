@@ -61,7 +61,11 @@ class Chunk(Base):
     resource_id = Column(UUID(as_uuid=True), ForeignKey("resources.id", ondelete="CASCADE"))
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"))
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768))  # 768-dimensional vector
+    # Parent Document Retrieval fields
+    parent_content = Column(Text, nullable=True)  # Content of the parent chunk (larger context)
+    parent_chunk_id = Column(UUID(as_uuid=True), nullable=True) # Link to parent if using hierarchy
+    
+    embedding = Column(Vector(1024))  # BAAI/bge-m3 uses 1024d
     chunk_index = Column(Integer, nullable=False)
     token_count = Column(Integer, nullable=False)
     chunk_metadata = Column(JSONB, default={})
