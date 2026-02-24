@@ -1,0 +1,98 @@
+services:
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_app
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8000:8000" # FastAPI Backend
+      - "3000:3000" # Vite Frontend
+    environment:
+      - DATABASE_URL=postgresql://postgres:IAmCrazy1@postgres:5432/rag_db
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://rag_ollama:11434
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-sentence-transformers/all-mpnet-base-v2}
+      - CHAT_MODEL=${CHAT_MODEL:-gemma3:4b}
+      - ENABLE_GPU=${ENABLE_GPU:-auto}
+      - FORCE_CPU=${FORCE_CPU:-false}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_GENAI_USE_VERTEXAI=${GOOGLE_GENAI_USE_VERTEXAI:-true}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/backend/vertex.json
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_BASE_URL=${VLLM_BASE_URL}
+      
+      # Frontend ENV
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+      - ./backend/vertex.json:/app/backend/vertex.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - rag_network
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=IAmCrazy1
+      - POSTGRES_DB=rag_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rag_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rag_network
+
+  redis:
+    image: redis:alpine
+    container_name: rag_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - rag_network
+
+  ollama:
+    image: ollama/ollama
+    container_name: rag_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - rag_network
+    # Optional: Enable GPU access for Ollama if you have NVIDIA/Docker toolkit
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+networks:
+  rag_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
