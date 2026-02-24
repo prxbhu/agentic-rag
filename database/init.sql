@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     resource_id UUID REFERENCES resources(id) ON DELETE CASCADE,
     workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    embedding vector(1024), -- BAAI/bge-m3 dimension
+    embedding vector(768), -- sentence-transformers/all-mpnet-base-v2 dimension
     parent_content TEXT, -- Content of the parent chunk (larger context)
     parent_chunk_id UUID, -- Link to parent (logical grouping)
     chunk_index INTEGER NOT NULL,
@@ -175,7 +175,7 @@ ON CONFLICT DO NOTHING;
 
 -- Function for hybrid search (semantic + BM25)
 CREATE OR REPLACE FUNCTION hybrid_search(
-    query_embedding vector(1024),
+    query_embedding vector(768),
     query_text TEXT,
     workspace_filter UUID,
     result_limit INT DEFAULT 20,

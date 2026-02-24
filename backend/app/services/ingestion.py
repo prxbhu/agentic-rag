@@ -177,8 +177,8 @@ class IngestionService:
         Create intelligent chunks with Parent Document Retrieval support.
         
         Strategy:
-        1. Split into large "Parent Docs" (DEFAULT_CHUNK_SIZE, e.g. 1024 tokens)
-        2. Split Parents into smaller "Child Chunks" (CHILD_CHUNK_SIZE, e.g. 256 tokens)
+        1. Split into large "Parent Docs" (DEFAULT_CHUNK_SIZE, e.g. 768 tokens)
+        2. Split Parents into smaller "Child Chunks" (CHILD_CHUNK_SIZE, e.g. 192 tokens)
         3. Index Children, but store link to Parent.
         """
         chunks = []

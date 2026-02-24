@@ -34,19 +34,19 @@ class Settings(BaseSettings):
     
     # Embedding Model
     EMBEDDING_MODEL: str = Field(
-        default="BAAI/bge-m3",
+        default="sentence-transformers/all-mpnet-base-v2",
         description="HuggingFace embedding model"
     )
     EMBEDDING_DIMENSION: int = Field(
-        default=1024,
+        default=768,
         description="Embedding vector dimension"
     )
     DEFAULT_CHUNK_SIZE: int = Field(
-        default=1024,
+        default=768,
         description="Default chunk size in tokens (Parent Chunk)"
     )
     CHILD_CHUNK_SIZE: int = Field(
-        default=256,
+        default=192,
         description="Child chunk size in tokens for indexing"
     )
     CHUNK_OVERLAP: int = Field(

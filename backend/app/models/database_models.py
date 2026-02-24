@@ -65,7 +65,7 @@ class Chunk(Base):
     parent_content = Column(Text, nullable=True)  # Content of the parent chunk (larger context)
     parent_chunk_id = Column(UUID(as_uuid=True), nullable=True) # Link to parent if using hierarchy
     
-    embedding = Column(Vector(1024))  # BAAI/bge-m3 uses 1024d
+    embedding = Column(Vector(768))  # sentence-transformers/all-mpnet-base-v2 uses 768d
     chunk_index = Column(Integer, nullable=False)
     token_count = Column(Integer, nullable=False)
     chunk_metadata = Column(JSONB, default={})
