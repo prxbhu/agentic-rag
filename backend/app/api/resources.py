@@ -1,6 +1,8 @@
 """
 API endpoints for resource management (document upload and processing)
 """
+import gc
+import torch
 import json
 import logging
 import hashlib
@@ -183,7 +185,10 @@ async def upload_document(
         
          # Start async embedding task
         task = generate_embeddings_task.apply_async(
-                args=[str(resource_id), [{"id": str(c["id"]), "content": c["content"]} for c in chunks]],
+                args=[str(resource_id), [{"id": str(c["id"]), 
+                                          "content": c["content"], 
+                                          "workspace_id": str(workspace_id), 
+                                          "filename": file.filename} for c in chunks]],
                 task_id=task_id
 )
         
@@ -202,6 +207,12 @@ async def upload_document(
         logger.error(f"Upload failed: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally: 
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
 @router.get("/list")
 async def list_resources(
