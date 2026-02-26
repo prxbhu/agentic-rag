@@ -1,6 +1,8 @@
 """
 Celery tasks for asynchronous embedding generation
 """
+import gc
+import torch
 import logging
 from typing import List, Dict
 from uuid import UUID
@@ -12,6 +14,10 @@ from sqlalchemy.orm import sessionmaker
 from app.tasks.celery_app import celery_app
 from app.services.embedding import embedding_service
 from app.config import settings
+
+from llama_index.core.schema import TextNode
+from llama_index.core import VectorStoreIndex, StorageContext
+from app.services.llama_index_service import init_llamaindex
 
 logger = logging.getLogger(__name__)
 
@@ -60,33 +66,59 @@ def generate_embeddings_task(self, resource_id: str, chunks: List[Dict]):
             total_chunks=len(chunks)
         )
         
-        # Extract texts for batch processing
-        texts = [chunk["content"] for chunk in chunks]
+        nodes = []
+        for chunk in chunks:
+            node = TextNode(
+                text=chunk["content"],
+                id_=chunk["id"], 
+                metadata={"resource_id": resource_id, 
+                          "workspace_id": chunk.get("workspace_id", ""),
+                          "filename": chunk.get("filename", "unknown")}
+            )
+            nodes.append(node)
         
-        # Generate embeddings in batches
-        embeddings = embedding_service.embed_batch(texts)
+        vector_store = init_llamaindex()
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
-        # Store embeddings in database
-        _store_embeddings(chunks, embeddings)
-        
-        # Update task status to completed
-        _update_task_status(
-            resource_id=resource_id,
-            task_id=task_id,
-            status="completed",
-            chunks_processed=len(chunks)
+        logger.info(f"Task {task_id}: Indexing {len(nodes)} nodes into PGVectorStore")
+        VectorStoreIndex(
+            nodes=nodes,
+            storage_context=storage_context,
+            show_progress=False
         )
         
-        # Update resource status
+        _update_task_status(resource_id=resource_id, task_id=task_id, status="completed", chunks_processed=len(chunks))
         _update_resource_status(resource_id, "completed")
         
-        logger.info(f"Task {task_id}: Successfully generated {len(chunks)} embeddings")
+        return {"resource_id": resource_id, "chunks_processed": len(chunks), "status": "completed"}
+    
+        # # Extract texts for batch processing
+        # texts = [chunk["content"] for chunk in chunks]
         
-        return {
-            "resource_id": resource_id,
-            "chunks_processed": len(chunks),
-            "status": "completed"
-        }
+        # # Generate embeddings in batches
+        # embeddings = embedding_service.embed_batch(texts)
+        
+        # # Store embeddings in database
+        # _store_embeddings(chunks, embeddings)
+        
+        # # Update task status to completed
+        # _update_task_status(
+        #     resource_id=resource_id,
+        #     task_id=task_id,
+        #     status="completed",
+        #     chunks_processed=len(chunks)
+        # )
+        
+        # # Update resource status
+        # _update_resource_status(resource_id, "completed")
+        
+        # logger.info(f"Task {task_id}: Successfully generated {len(chunks)} embeddings")
+        
+        # return {
+        #     "resource_id": resource_id,
+        #     "chunks_processed": len(chunks),
+        #     "status": "completed"
+        # }
         
     except Exception as e:
         logger.error(f"Task {task_id}: Embedding generation failed: {e}")
@@ -104,6 +136,13 @@ def generate_embeddings_task(self, resource_id: str, chunks: List[Dict]):
         
         # Retry if possible
         raise self.retry(exc=e)
+    
+    finally: 
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
 
 def _update_task_status(

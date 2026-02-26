@@ -15,6 +15,9 @@ import tiktoken
 
 from app.config import settings
 
+from llama_index.core import Document as LlamaDocument
+from llama_index.core.node_parser import SentenceSplitter
+
 from docling.document_converter import DocumentConverter, PdfFormatOption, WordFormatOption, CsvFormatOption, ExcelFormatOption, PowerpointFormatOption, MarkdownFormatOption, HTMLFormatOption, ImageFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
@@ -407,17 +410,35 @@ class DoclingIngestionService(IngestionService):
 
             # Clean and normalize text
             text = self._clean_text(text)
-
-            # Split into chunks (inherits logic from IngestionService)
-            chunks = self._create_chunks(
+            
+            doc = LlamaDocument(
                 text=text,
-                resource_id=resource_id,
-                workspace_id=workspace_id,
-                metadata={"filename": filename, "file_type": file_type}
+                metadata={"filename": filename, 
+                          "resource_id": str(resource_id), 
+                          "workspace_id": str(workspace_id),
+                          "file_type": file_type,
+                          }
             )
+            
+            parser = SentenceSplitter(
+                chunk_size=settings.DEFAULT_CHUNK_SIZE, 
+                chunk_overlap=settings.CHUNK_OVERLAP
+            )
+            nodes = parser.get_nodes_from_documents([doc])
+            
+            chunks = []
+            for i, node in enumerate(nodes):
+                chunks.append({
+                    "id": node.node_id, 
+                    "content": node.get_content(),
+                    "chunk_index": i,
+                    "token_count": len(node.get_content().split()), 
+                    "metadata": node.metadata,
+                    "parent_content": None,
+                    "parent_chunk_id": None
+                })
 
-            logger.info(f"Created {len(chunks)} chunks from {filename} using Docling")
-
+            logger.info(f"Created {len(chunks)} chunks using LlamaIndex SentenceSplitter")
             return chunks
 
         except Exception as e:

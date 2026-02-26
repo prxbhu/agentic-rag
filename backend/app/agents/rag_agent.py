@@ -11,9 +11,13 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
+from llama_index.core import VectorStoreIndex
+from llama_index.core.vector_stores import ExactMatchFilter, MetadataFilters
+
 from app.config import settings
 from app.services.enhanced_rag import AdvancedRerankingService, QueryDecompositionAgent, ValidationService, retry_with_backoff
 from app.services.llm_service import LLMServiceFactory
+from app.services.llama_index_service import init_llamaindex
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,9 @@ class RAGAgent:
         self.reranking_service = AdvancedRerankingService(search_service.db)
         self.validation_service = ValidationService()
         
+        self.vector_store = init_llamaindex()
+        self.index = VectorStoreIndex.from_vector_store(self.vector_store)
+        
         # Initialize LLM
         self.llm = LLMServiceFactory.create_llm_service(llm_provider)
         
@@ -79,7 +86,7 @@ class RAGAgent:
         
          # Add nodes
         workflow.add_node("expand_query", self.expand_query)
-        workflow.add_node("hybrid_search", self.hybrid_search)
+        workflow.add_node("retrieve_data", self.retrieve_data)
         workflow.add_node("rerank_results", self.rerank_results)
         workflow.add_node("rank_results", self.rank_results)
         workflow.add_node("assemble_context", self.assemble_context)
@@ -90,8 +97,8 @@ class RAGAgent:
         
         # Define edges
         workflow.set_entry_point("expand_query")
-        workflow.add_edge("expand_query", "hybrid_search")
-        workflow.add_edge("hybrid_search", "rerank_results")
+        workflow.add_edge("expand_query", "retrieve_data")
+        workflow.add_edge("retrieve_data", "rerank_results")
         workflow.add_edge("rerank_results", "rank_results")
         workflow.add_edge("rank_results", "assemble_context")
         workflow.add_edge("assemble_context", "generate_response")
@@ -196,6 +203,78 @@ class RAGAgent:
         return {
             "search_results": validated[:50]  # Limit to top 50
         }
+
+    async def retrieve_data(self, state: RAGState) -> Dict:
+        """
+        Replaces manual hybrid_search with LlamaIndex Retriever.
+        Maintains your existing multi-query deduplication logic!
+        """
+        logger.info(f"Retrieving data using LlamaIndex for {len(state['expanded_queries'])} queries")
+        logger.info(f"LlamaIndex Retrival - Target Workspace ID: {state['workspace_id']}")
+        
+        chunk_results = {}
+        chunk_query_hits = {}
+        
+        filters = MetadataFilters(
+            filters=[ExactMatchFilter(key="workspace_id", value=str(state["workspace_id"]))]
+        )
+        retriever = self.index.as_retriever(
+            similarity_top_k=settings.MAX_SEARCH_RESULTS,
+            filters=filters
+        )
+
+        async def run_one(q: str):
+            logger.info(f"Executing LlamaIndex retrieval for: '{q}'")
+            nodes = await retriever.aretrieve(q)
+            logger.info(f"Query '{q}' returned {len(nodes)} nodes.")
+            return nodes
+
+        for idx, q in enumerate(state["expanded_queries"]):
+            try:
+                nodes = await retry_with_backoff(lambda: run_one(q))
+            except Exception as e:
+                logger.warning(f"Retrieval failed for query='{q}': {e}")
+                continue
+
+            for node in nodes:
+                cid = str(node.node_id)
+                chunk_query_hits[cid] = chunk_query_hits.get(cid, 0) + 1
+                
+                score = node.score if node.score is not None else 0.0
+                logger.info(f"Retrieved Node: {cid[:8]}... | Score: {score:.3f} | File: {node.metadata.get('filename')}")
+                
+                result_dict = {
+                    "chunk_id": cid,
+                    "content": node.get_content(),
+                    "combined_score": node.score or 0.0,
+                    "metadata": node.metadata,
+                    "filename": node.metadata.get("filename", "unknown"),
+                    "resource_id": node.metadata.get("resource_id"),
+                    "parent_content": node.metadata.get("parent_content", "") 
+                }
+                
+                if cid not in chunk_results or result_dict["combined_score"] > chunk_results[cid].get("combined_score", 0):
+                    chunk_results[cid] = result_dict
+
+        all_results = []
+        for cid, result in chunk_results.items():
+            query_boost = 1.0 + (0.1 * (chunk_query_hits[cid] - 1))
+            original_score = result.get("combined_score", 0)
+            result["combined_score"] = original_score * query_boost
+            result["query_hit_count"] = chunk_query_hits[cid]
+            all_results.append(result)
+            
+            logger.debug(f"Node {cid[:8]} | Orig Score: {original_score:.3f} | Hits: {chunk_query_hits[cid]} | Boosted: {result['combined_score']:.3f}")
+        
+        all_results.sort(key=lambda x: x.get("combined_score", 0), reverse=True)
+        
+        if not all_results:
+            logger.warning("No results found! Check if 'workspace_id' in the DB matches the current workspace.")
+            
+        validated, note = await ValidationService.validate_search_results(all_results, min_score=0.10)
+        logger.info(f"Validation Note: {note} | Final validated results: {len(validated)}")
+        
+        return {"search_results": validated[:50]}
 
     async def rerank_results(self, state: RAGState) -> Dict:
         """IMPROVED: Better reranking with fixed weights"""
@@ -648,7 +727,8 @@ class RAGAgent:
             state.update(out)
 
             yield {"type": "status", "data": f"Searching across {len(state['expanded_queries'])} query variants..."}
-            out = await self.hybrid_search(state)
+            #out = await self.hybrid_search(state)
+            out = await self.retrieve_data(state)  # Use LlamaIndex retrieval
             state.update(out)
 
             yield {"type": "status", "data": f"Reranking {len(state.get('search_results', []))} results..."}
